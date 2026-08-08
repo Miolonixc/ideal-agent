@@ -49,7 +49,10 @@ class TestProviders(unittest.TestCase):
 
 class TestCommands(unittest.TestCase):
     def setUp(self):
-        self.agent = Agent(AgentConfig(workspace="/tmp", mode="auto"))
+        import tempfile
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), mode="auto")
+        cfg.use_context = False
+        self.agent = Agent(cfg)
 
     def test_commands(self):
         self.assertIsNone(self.agent.command("обычный текст"))
@@ -76,7 +79,10 @@ class TestHTTPChannel(unittest.TestCase):
     def test_live(self):
         import time
         import socket
-        a = Agent(AgentConfig(workspace="/tmp", mode="full-auto"))
+        import tempfile
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), mode="full-auto")
+        cfg.use_context = False
+        a = Agent(cfg)
         a.provider = FakeProvider()
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.bind(("127.0.0.1", 0))
@@ -105,7 +111,10 @@ class TestHTTPChannel(unittest.TestCase):
 
 class TestStream(unittest.TestCase):
     def test_fallback_stream(self):
-        a = Agent(AgentConfig(workspace="/tmp", mode="full-auto"))
+        import tempfile
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), mode="full-auto")
+        cfg.use_context = False
+        a = Agent(cfg)
         a.provider = FakeProvider()  # нет stream_completion -> fallback
         out = list(a.stream("привет"))
         self.assertEqual(out, ["ok"])
@@ -127,7 +136,10 @@ class TestStream(unittest.TestCase):
             def count_tokens(self, t):
                 return 1
 
-        a = Agent(AgentConfig(workspace="/tmp", mode="full-auto"))
+        import tempfile
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), mode="full-auto")
+        cfg.use_context = False
+        a = Agent(cfg)
         a.provider = StreamP()
         out = list(a.stream("привет"))
         self.assertTrue(any("ра" in c for c in out))
