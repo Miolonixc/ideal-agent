@@ -1,0 +1,280 @@
+import json
+import os
+import re
+import sys
+from typing import Any, Dict, List
+
+from . import llm as llm_mod
+from . import builtin_tools
+from . import safety
+from . import memory as memory_mod
+from .tools import ToolRegistry
+
+
+MAX_ITER = 12
+
+
+class HistoryManager:
+    def __init__(self, provider, budget=6000):
+        self.provider = provider
+        self.budget = budget
+        self.messages: List[Dict[str, Any]] = []
+
+    def add(self, msg):
+        self.messages.append(msg)
+
+    def tokens(self):
+        total = 0
+        for m in self.messages:
+            total += self.provider.count_tokens(
+                (m.get("content") or "") + json.dumps(m.get("tool_calls") or "")
+            )
+        return total
+
+    def compact(self):
+        if self.tokens() <= self.budget or len(self.messages) < 4:
+            return
+        keep = self.messages[-3:]
+        to_sum = self.messages[:-3]
+        text = "\n".join(
+            f"{m.get('role')}: {m.get('content') or ''}" for m in to_sum
+        )
+        summary = self.provider.complete(
+            [
+                {"role": "system", "content": "Сожми ниже в краткое резюме контекста для агента."},
+                {"role": "user", "content": text},
+            ],
+            stream=False,
+        )
+        if isinstance(summary, str):
+            summ = summary
+        else:
+            summ = summary["choices"][0]["message"]["content"]
+        self.messages = [
+            {"role": "system", "content": f"[summary of earlier context]\n{summ}"}
+        ] + keep
+
+
+class Agent:
+    def __init__(self, cfg, registry=None):
+        self.cfg = cfg
+        self.provider = llm_mod.get_provider(cfg.llm)
+        self.history = HistoryManager(self.provider, budget=getattr(cfg, "context_budget", 6000))
+        self.registry = registry or ToolRegistry()
+        self.gate = safety.ApprovalGate(cfg.mode, cfg.allow, cfg.deny)
+        self.audit = safety.AuditLog()
+        self.repo_index = None
+        self.memory = None
+        self._context_ready = False
+        self._register_defaults()
+
+    def _register_defaults(self):
+        builtin_tools.register_builtin_tools(self.registry, self.cfg)
+        self.registry.register(
+            "echo",
+            "Возвращает переданный текст (демо-тул).",
+            {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+            lambda a: a.get("text", ""),
+        )
+        self._mcp_clients = []
+
+    def load_skills_dir(self, skills_dir):
+        from .skills import load_skills
+        return load_skills(self.registry, skills_dir)
+
+    def connect_mcp(self, command, args=None):
+        from .mcp import MCPClient
+        client = MCPClient(command, args)
+        client.initialize()
+        tools = client.list_tools()
+        for t in tools:
+            name = t["name"]
+            schema = t.get("inputSchema", {"type": "object", "properties": {}})
+
+            def make_handler(client_ref, tname):
+                def handler(args):
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    res = client_ref.call_tool(tname, args)
+                    content = res.get("content", [])
+                    text = "".join(
+                        c.get("text", "") for c in content if isinstance(c, dict)
+                    )
+                    return text[:4000]
+                return handler
+
+            self.registry.register(name, t.get("description", ""), schema, make_handler(client, name))
+        self._mcp_clients.append(client)
+        return [t["name"] for t in tools]
+
+    def _extract_tool_calls(self, msg):
+        tcs = msg.get("tool_calls")
+        if tcs:
+            return [(tc["id"], tc["function"]["name"], tc["function"].get("arguments", "")) for tc in tcs]
+        content = msg.get("content") or ""
+        found = re.findall(r"TOOL:\s*(\w+)\s*(\{.*?\})", content, re.S)
+        return [("md_%d" % i, n, a) for i, (n, a) in enumerate(found)]
+
+    def _ensure_context(self):
+        if not self.cfg.use_context or self._context_ready:
+            return
+        self._context_ready = True
+        ws = self.cfg.workspace
+        if os.path.isdir(ws):
+            self.repo_index = memory_mod.RepoIndex()
+            try:
+                self.repo_index.build(ws)
+            except Exception:
+                self.repo_index = None
+        self.memory = memory_mod.MemoryStore()
+
+    def _retrieve(self, text):
+        parts = []
+        if self.repo_index:
+            for h in self.repo_index.search(text, top_k=3):
+                meta = h.get("meta") or {}
+                parts.append(
+                    f"[file {meta.get('path')}:{meta.get('start', 0)}]\n{h['text'][:500]}"
+                )
+        if self.memory:
+            for f in self.memory.recall(text, top_k=3):
+                parts.append(f"[memory] {f['text']}")
+        return "\n\n".join(parts)
+
+    def _inject_context(self, text):
+        sys_msg = "Ты — полезный AI-агент для разработки."
+        if self.cfg.use_context:
+            ctx = self._retrieve(text)
+            if ctx:
+                sys_msg += "\n\nРелевантный контекст из репозитория и памяти:\n" + ctx
+        if self.history.messages and self.history.messages[0].get("role") == "system":
+            self.history.messages[0]["content"] = sys_msg
+        else:
+            self.history.messages.insert(0, {"role": "system", "content": sys_msg})
+
+    def command(self, text):
+        """Обработка слэш-команд. Возвращает текст ответа или None (не команда).
+        Спец. значение '__EXIT__' — канал должен завершиться."""
+        if not text.startswith("/"):
+            return None
+        parts = text[1:].split(None, 1)
+        cmd = parts[0].lower()
+        arg = parts[1] if len(parts) > 1 else ""
+        if cmd in ("exit", "quit"):
+            return "__EXIT__"
+        if cmd == "help":
+            return (
+                "Команды:\n"
+                "/help — справка\n"
+                "/mode [auto|suggest|full-auto] — режим апрува\n"
+                "/clear — очистить контекст диалога\n"
+                "/status — модель/режим/число тулов\n"
+                "/skills — список доступных навыков и тулов\n"
+                "/provider — текущий провайдер/модель"
+            )
+        if cmd == "mode":
+            if arg in ("auto", "suggest", "full-auto"):
+                self.gate.mode = arg
+                return f"режим апрува: {arg}"
+            return "используй: /mode auto | suggest | full-auto"
+        if cmd == "clear":
+            self.history.messages = []
+            self._context_ready = False
+            return "контекст диалога очищен"
+        if cmd == "status":
+            return (f"провайдер={self.provider.__class__.__name__} модель={self.provider.model} "
+                    f"режим={self.gate.mode} тулов={len(self.registry._tools)}")
+        if cmd == "provider":
+            return f"{self.provider.__class__.__name__} / {self.provider.model}"
+        if cmd == "skills":
+            names = sorted(self.registry._tools.keys())
+            return "навыки и тулы: " + ", ".join(names)
+        return None
+
+    def _handle_tools(self, msg, tool_calls):
+        if "tool_calls" in msg:
+            self.history.add(msg)
+        else:
+            self.history.add({"role": "assistant", "content": msg.get("content")})
+        for tc_id, name, args in tool_calls:
+            decision, reason = self.gate.decide(name, args)
+            if decision == "deny":
+                result = f"error: запрещено ({reason})"
+            elif decision == "ask":
+                if sys.stdin.isatty():
+                    ans = input(f"разрешить {name}({args})? [y/N] ")
+                    result = self.registry.call(name, args) if ans.lower() == "y" else "error: отклонено пользователем"
+                else:
+                    result = "error: требуется подтверждение (нет TTY)"
+            else:
+                result = self.registry.call(name, args)
+            self.audit.record(decision, name, args, result)
+            self.history.add({"role": "tool", "tool_call_id": tc_id, "content": result})
+
+    def run(self, text):
+        self.history.add({"role": "user", "content": text})
+        self._ensure_context()
+        self._inject_context(text)
+        for _ in range(MAX_ITER):
+            resp = self.provider.complete(
+                self.history.messages, tools=self.registry.schema(), stream=False
+            )
+            msg = resp["choices"][0]["message"]
+            tool_calls = self._extract_tool_calls(msg)
+            if tool_calls:
+                self._handle_tools(msg, tool_calls)
+                continue
+            reply = msg.get("content") or ""
+            self.history.add({"role": "assistant", "content": reply})
+            self.history.compact()
+            return reply
+        return "[достигнут лимит итераций]"
+
+    def stream(self, text):
+        """Генератор: yield куски ответа по мере генерации (streaming)."""
+        self.history.add({"role": "user", "content": text})
+        self._ensure_context()
+        self._inject_context(text)
+        for _ in range(MAX_ITER):
+            if hasattr(self.provider, "stream_completion"):
+                content = ""
+                saw_tool = False
+                tcs = []
+                for kind, data in self.provider.stream_completion(
+                    self.history.messages, self.registry.schema()
+                ):
+                    if kind == "content":
+                        content += data
+                        yield data
+                    elif kind == "tool":
+                        saw_tool = True
+                        tcs = data
+                if saw_tool:
+                    msg = {"role": "assistant", "content": content, "tool_calls": tcs}
+                    self._handle_tools(msg, [
+                        (tc.get("id"), tc.get("function", {}).get("name"),
+                         tc.get("function", {}).get("arguments", ""))
+                        for tc in tcs
+                    ])
+                    continue
+                self.history.add({"role": "assistant", "content": content})
+                self.history.compact()
+                return
+            # fallback: без потоковой генерации — отдаём весь ответ целиком
+            resp = self.provider.complete(
+                self.history.messages, tools=self.registry.schema(), stream=False
+            )
+            msg = resp["choices"][0]["message"]
+            tool_calls = self._extract_tool_calls(msg)
+            if tool_calls:
+                self._handle_tools(msg, tool_calls)
+                continue
+            reply = msg.get("content") or ""
+            self.history.add({"role": "assistant", "content": reply})
+            self.history.compact()
+            yield reply
+            return
+        yield "[достигнут лимит итераций]"

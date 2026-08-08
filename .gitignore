@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Secrets / local config
+.env
+*.local
+config.json
+!config.example.json
+
+# Logs
+*.log
+logs/
+
+# Android build
+.gradle/
+android/idealagent/app/build/
+android/idealagent/build/
+android/idealagent/local.properties
+*.apk
+*.aab
+capture*
+
+# OS
+.DS_Store

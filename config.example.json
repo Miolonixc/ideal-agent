@@ -1,0 +1,24 @@
+{
+  "llm": {
+    "provider": "openai-compatible",
+    "base_url": "https://api.tokenrouter.com/v1",
+    "model": "moonshotai/kimi-k3-free",
+    "api_key": "",
+    "max_tokens": 2048
+  },
+  "mode": "auto",
+  "allow": [],
+  "deny": ["shell:rm -rf"],
+  "workspace": "~/dev",
+  "skills_dir": "skills",
+  "mcp_servers": [
+    "python3 mcp_servers/fs_mcp.py",
+    "python3 mcp_servers/fetch_mcp.py",
+    "GITHUB_TOKEN=... python3 mcp_servers/github_mcp.py"
+  ],
+  "use_context": true,
+  "telegram": {
+    "token": "",
+    "allowed": [77002359]
+  }
+}
