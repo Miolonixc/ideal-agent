@@ -74,24 +74,33 @@ class TestGitHubWebhook(unittest.TestCase):
 
 class TestHTTPChannel(unittest.TestCase):
     def test_live(self):
+        import time
+        import socket
         a = Agent(AgentConfig(workspace="/tmp", mode="full-auto"))
         a.provider = FakeProvider()
-        ch = HTTPChannel(host="127.0.0.1", port=18099)
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.bind(("127.0.0.1", 0))
+        port = srv.getsockname()[1]
+        srv.close()
+        ch = HTTPChannel(host="127.0.0.1", port=port)
         threading.Thread(target=ch.run, args=(a,), daemon=True).start()
-        import time
-        time.sleep(1)
-        try:
-            status = json.loads(urllib.request.urlopen("http://127.0.0.1:18099/").read())
-            self.assertTrue(status["ok"])
-            req = urllib.request.Request(
-                "http://127.0.0.1:18099/message",
-                data=json.dumps({"text": "привет"}).encode(),
-                headers={"Content-Type": "application/json"}, method="POST",
-            )
-            res = json.loads(urllib.request.urlopen(req, timeout=10).read())
-            self.assertEqual(res["reply"], "ok")
-        finally:
-            pass
+        base = f"http://127.0.0.1:{port}"
+        # ждём готовности сервера
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(base + "/", timeout=1)
+                break
+            except Exception:
+                time.sleep(0.1)
+        status = json.loads(urllib.request.urlopen(base + "/", timeout=5).read())
+        self.assertTrue(status["ok"])
+        req = urllib.request.Request(
+            base + "/message",
+            data=json.dumps({"text": "привет"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        res = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        self.assertEqual(res["reply"], "ok")
 
 
 class TestStream(unittest.TestCase):
