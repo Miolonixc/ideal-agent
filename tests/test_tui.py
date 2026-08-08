@@ -1,6 +1,7 @@
 from __future__ import annotations
 import importlib
 import sys
+import tempfile
 import unittest
 
 
@@ -104,7 +105,9 @@ class TestTUI(unittest.TestCase):
 
         from agent.config import AgentConfig
         from agent.core import Agent
-        agent = Agent(AgentConfig(workspace="/tmp", mode="full-auto"))
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), mode="full-auto")
+        cfg.use_context = False
+        agent = Agent(cfg)
         agent.provider = FakeP()
 
         FakeCurses._q = ["h", "i", 10,
@@ -131,7 +134,9 @@ class TestTUI(unittest.TestCase):
 
         from agent.config import AgentConfig
         from agent.core import Agent
-        agent = Agent(AgentConfig(workspace="/tmp", mode="full-auto"))
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), mode="full-auto")
+        cfg.use_context = False
+        agent = Agent(cfg)
         agent.provider = FakeP()
 
         FakeCurses._q = ["п", "р", "и", "в", "е", "т", 10, FakeCurses.KEY_UP, 10, 4]

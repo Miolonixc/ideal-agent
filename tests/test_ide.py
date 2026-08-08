@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import socket
+import tempfile
 import threading
 import time
 import unittest
@@ -27,7 +28,8 @@ class TestIDEChannel(unittest.TestCase):
             def count_tokens(self, t):
                 return len(t) // 4
 
-        agent = Agent(AgentConfig(workspace="/tmp"))
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp()))
+        agent.cfg.use_context = False
         agent.provider = FakeP()
         channel = SocketChannel(port=port)
 
