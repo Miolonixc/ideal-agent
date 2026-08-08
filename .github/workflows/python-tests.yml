@@ -15,4 +15,4 @@ jobs:
         with:
           python-version: "3.11"
       - name: Run tests
-        run: python3 -m unittest discover -s tests
+        run: timeout 120 python3 -m unittest discover -s tests
