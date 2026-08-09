@@ -388,6 +388,19 @@ class HTTPChannel(Channel):
                     data = json.loads(raw.decode() or "{}")
                 except Exception:
                     data = {}
+                # переопределение провайдера/модели/ключа на лету (из компаньона)
+                override = None
+                if data.get("provider") or data.get("api_key") or data.get("model"):
+                    try:
+                        from agent import llm as _llm
+                        override = _llm.build_provider(
+                            name=data.get("provider") or "openai-compatible",
+                            api_key=data.get("api_key"),
+                            model=data.get("model"),
+                            base_url=data.get("base_url"),
+                        )
+                    except Exception:
+                        override = None
                 if self.path == "/message":
                     text = (data.get("text") or "").strip()
                     if not text:
@@ -401,7 +414,15 @@ class HTTPChannel(Channel):
                         self._send(200, {"ok": True, "reply": cmd, "chat_id": "http"})
                         return
                     try:
-                        reply = bot._agent.run(text)
+                        if override:
+                            saved = bot._agent.provider
+                            bot._agent.provider = override
+                            try:
+                                reply = bot._agent.run(text)
+                            finally:
+                                bot._agent.provider = saved
+                        else:
+                            reply = bot._agent.run(text)
                     except Exception as e:
                         reply = f"[ошибка агента] {e}"
                     self._send(200, {"ok": True, "reply": reply, "chat_id": "http"})
@@ -433,9 +454,17 @@ class HTTPChannel(Channel):
                         elif cmd is not None:
                             self.wfile.write(b"data: " + json.dumps({"chunk": cmd}).encode() + b"\n\n")
                         else:
-                            for chunk in bot._agent.stream(text):
-                                self.wfile.write(b"data: " + json.dumps({"chunk": chunk}, ensure_ascii=False).encode() + b"\n\n")
-                                self.wfile.flush()
+                            saved = None
+                            if override:
+                                saved = bot._agent.provider
+                                bot._agent.provider = override
+                            try:
+                                for chunk in bot._agent.stream(text):
+                                    self.wfile.write(b"data: " + json.dumps({"chunk": chunk}, ensure_ascii=False).encode() + b"\n\n")
+                                    self.wfile.flush()
+                            finally:
+                                if saved is not None:
+                                    bot._agent.provider = saved
                     except Exception as e:
                         self.wfile.write(b"data: " + json.dumps({"chunk": f"[ошибка] {e}"}).encode() + b"\n\n")
                     self.wfile.write(b"data: [DONE]\n\n")

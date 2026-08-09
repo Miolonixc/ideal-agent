@@ -15,7 +15,7 @@ class OpenAICompatible:
     """OpenAI-совместимый провайдер (также Ollama/OpenRouter/TokenRouter)."""
 
     def __init__(self, base_url, api_key, model, temperature=0.3, timeout=120, max_tokens=2048):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
@@ -328,6 +328,34 @@ class GeminiProvider:
             yield ("tool", tcs)
 
 
+class GroqProvider(OpenAICompatible):
+    """Groq — сверхбыстрый inference, есть бесплатные модели."""
+
+    def __init__(self, base_url=None, api_key=None, model=None, temperature=0.3, timeout=120, max_tokens=2048):
+        super().__init__("https://api.groq.com/openai/v1", api_key, model, temperature, timeout, max_tokens)
+
+
+class DeepSeekProvider(OpenAICompatible):
+    """DeepSeek — бесплатный и недорогой API."""
+
+    def __init__(self, base_url=None, api_key=None, model=None, temperature=0.3, timeout=120, max_tokens=2048):
+        super().__init__("https://api.deepseek.com/v1", api_key, model, temperature, timeout, max_tokens)
+
+
+class MoonshotProvider(OpenAICompatible):
+    """Moonshot AI / Kimi — есть бесплатные модели (kimi-k3-free и т.п.)."""
+
+    def __init__(self, base_url=None, api_key=None, model=None, temperature=0.3, timeout=120, max_tokens=2048):
+        super().__init__("https://api.moonshot.ai/v1", api_key, model, temperature, timeout, max_tokens)
+
+
+class TogetherProvider(OpenAICompatible):
+    """Together AI — открытые модели."""
+
+    def __init__(self, base_url=None, api_key=None, model=None, temperature=0.3, timeout=120, max_tokens=2048):
+        super().__init__("https://api.together.xyz/v1", api_key, model, temperature, timeout, max_tokens)
+
+
 _PROVIDERS = {
     "openai-compatible": OpenAICompatible,
     "openai": OpenAICompatible,
@@ -335,7 +363,18 @@ _PROVIDERS = {
     "ollama": OllamaProvider,
     "anthropic": AnthropicProvider,
     "gemini": GeminiProvider,
+    "groq": GroqProvider,
+    "deepseek": DeepSeekProvider,
+    "moonshot": MoonshotProvider,
+    "together": TogetherProvider,
 }
+
+
+def build_provider(name, api_key=None, model=None, base_url=None, temperature=0.3, timeout=120, max_tokens=2048):
+    """Создаёт провайдера по имени (для переопределения на лету, напр. из компаньона)."""
+    name = (name or "openai-compatible").lower()
+    cls = _PROVIDERS.get(name, OpenAICompatible)
+    return cls(base_url, api_key, model, temperature, timeout, max_tokens)
 
 
 def get_provider(cfg: "LLMConfig"):
