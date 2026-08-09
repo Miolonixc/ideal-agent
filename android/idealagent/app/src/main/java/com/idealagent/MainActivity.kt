@@ -15,9 +15,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -46,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +77,8 @@ fun ChatScreen() {
     val messages = remember { mutableStateListOf<Message>() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
 
     fun send() {
         if (busy || prompt.isBlank()) return
@@ -89,8 +94,8 @@ fun ChatScreen() {
         }
     }
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    LaunchedEffect(messages.size, imeBottom) {
+        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
     }
 
     Scaffold(
@@ -98,9 +103,7 @@ fun ChatScreen() {
             TopAppBar(
                 title = { Text("ideal-agent") },
                 actions = {
-                    FilledIconButton(
-                        onClick = { settingsOpen = !settingsOpen },
-                    ) {
+                    FilledIconButton(onClick = { settingsOpen = !settingsOpen }) {
                         Icon(
                             imageVector = Icons.Filled.Settings,
                             contentDescription = "Настройки подключения",
@@ -109,59 +112,12 @@ fun ChatScreen() {
                 },
             )
         },
-        bottomBar = {
-            Surface(
-                tonalElevation = 3.dp,
-                modifier = Modifier.imePadding(),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    OutlinedTextField(
-                        value = prompt,
-                        onValueChange = { prompt = it },
-                        label = { Text("Сообщение агенту") },
-                        singleLine = false,
-                        minLines = 1,
-                        maxLines = 4,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            imeAction = ImeAction.Send,
-                        ),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                            onSend = { send() },
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 8.dp),
-                    )
-                    FilledIconButton(
-                        onClick = { send() },
-                        enabled = !busy && prompt.isNotBlank(),
-                        modifier = Modifier.size(48.dp),
-                    ) {
-                        if (busy) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(22.dp),
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Отправить",
-                            )
-                        }
-                    }
-                }
-            }
-        },
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .imePadding(),
         ) {
             AnimatedVisibility(
                 visible = settingsOpen,
@@ -222,7 +178,10 @@ fun ChatScreen() {
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        top = 12.dp,
+                        bottom = 8.dp,
+                    ),
                 ) {
                     items(messages) { msg ->
                         val isUser = msg.role == "user"
@@ -245,6 +204,57 @@ fun ChatScreen() {
                                     modifier = Modifier.padding(12.dp),
                                 )
                             }
+                        }
+                    }
+                }
+            }
+
+            Surface(
+                tonalElevation = 3.dp,
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    OutlinedTextField(
+                        value = prompt,
+                        onValueChange = { prompt = it },
+                        label = { Text("Сообщение агенту") },
+                        singleLine = false,
+                        minLines = 1,
+                        maxLines = 4,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = ImeAction.Send,
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onSend = { send() },
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
+                    )
+                    FilledIconButton(
+                        onClick = { send() },
+                        enabled = !busy && prompt.isNotBlank(),
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        if (busy) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Отправить",
+                            )
                         }
                     }
                 }
