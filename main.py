@@ -83,7 +83,7 @@ def main():
     if sub == "http":
         from agent.channels import HTTPChannel
         port = opts["port"] or int(os.environ.get("IDEAL_HTTP_PORT", "8080"))
-        host = os.environ.get("IDEAL_HTTP_HOST", "127.0.0.1")
+        host = os.environ.get("IDEAL_HTTP_HOST", "0.0.0.0")
         HTTPChannel(host=host, port=port).run(agent)
         return
 
