@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,8 +48,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -68,13 +71,19 @@ data class Message(val role: String, val text: String)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen() {
-    var host by remember { mutableStateOf("192.168.2.107:8080") }
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("ideal_agent", Context.MODE_PRIVATE) }
+    var host by remember { mutableStateOf(prefs.getString("host", "192.168.2.107:8080") ?: "192.168.2.107:8080") }
     var prompt by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     val messages = remember { mutableStateListOf<Message>() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+
+    LaunchedEffect(host) {
+        prefs.edit().putString("host", host).apply()
+    }
 
     fun send() {
         if (busy || prompt.isBlank()) return
@@ -99,6 +108,14 @@ fun ChatScreen() {
             TopAppBar(
                 title = { Text("ideal-agent") },
                 actions = {
+                    if (messages.isNotEmpty()) {
+                        FilledIconButton(onClick = { messages.clear() }) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = "Очистить историю",
+                            )
+                        }
+                    }
                     FilledIconButton(onClick = { settingsOpen = !settingsOpen }) {
                         Icon(
                             imageVector = Icons.Filled.Settings,
