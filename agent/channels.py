@@ -447,7 +447,7 @@ class HTTPChannel(Channel):
                         override = None
                 if self.path == "/message":
                     text = (data.get("text") or "").strip()
-                    attachments = self._prepare_attachments(data)
+                    attachments = HTTPChannel._prepare_attachments(data)
                     if not text and not attachments:
                         self._send(400, {"ok": False, "error": "empty text"})
                         return
@@ -484,7 +484,7 @@ class HTTPChannel(Channel):
                     self._send(200, {"ok": True})
                 elif self.path == "/message/stream":
                     text = (data.get("text") or "").strip()
-                    attachments = self._prepare_attachments(data)
+                    attachments = HTTPChannel._prepare_attachments(data)
                     if not text and not attachments:
                         self._send(400, {"ok": False, "error": "empty text"})
                         return
