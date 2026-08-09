@@ -12,6 +12,7 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import java.io.ByteArrayOutputStream
 import androidx.compose.animation.AnimatedVisibility
@@ -478,7 +479,7 @@ fun ChatScreen() {
                     ) {
                         Box {
                             IconButton(onClick = { attachMenu = true }) {
-                                Icon(androidx.compose.material.icons.filled.AttachFile, contentDescription = "Прикрепить файл/скрин")
+                                Icon(androidx.compose.material.icons.filled.Add, contentDescription = "Прикрепить файл/скрин")
                             }
                             DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
                                 DropdownMenuItem(
