@@ -3,17 +3,51 @@ package com.idealagent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,63 +62,194 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+data class Message(val role: String, val text: String)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen() {
-    var host by remember { mutableStateOf("127.0.0.1:8080") }
+    var host by remember { mutableStateOf("192.168.2.107:8080") }
     var prompt by remember { mutableStateOf("") }
-    var reply by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
+    val messages = remember { mutableStateListOf<Message>() }
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text("ideal-agent", fontSize = 20.sp)
-        OutlinedTextField(
-            value = host,
-            onValueChange = { host = it },
-            label = { Text("Host:port") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = prompt,
-            onValueChange = { prompt = it },
-            label = { Text("Сообщение") },
-            singleLine = false,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            modifier = Modifier.fillMaxWidth()
-        )
-        Button(
-            onClick = {
-                if (!busy && prompt.isNotBlank()) {
-                    busy = true
-                    val h = host
-                    val p = prompt
-                    scope.launch {
-                        val r = askAgent(h, p)
-                        reply = r
-                        busy = false
+    fun send() {
+        if (busy || prompt.isBlank()) return
+        val h = host
+        val p = prompt
+        prompt = ""
+        messages.add(Message("user", p))
+        busy = true
+        scope.launch {
+            val r = askAgent(h, p)
+            messages.add(Message("agent", r))
+            busy = false
+        }
+    }
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("ideal-agent") },
+                actions = {
+                    FilledIconButton(
+                        onClick = { settingsOpen = !settingsOpen },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Настройки подключения",
+                        )
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            Surface(
+                tonalElevation = 3.dp,
+                modifier = Modifier.imePadding(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    OutlinedTextField(
+                        value = prompt,
+                        onValueChange = { prompt = it },
+                        label = { Text("Сообщение агенту") },
+                        singleLine = false,
+                        minLines = 1,
+                        maxLines = 4,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = ImeAction.Send,
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onSend = { send() },
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
+                    )
+                    FilledIconButton(
+                        onClick = { send() },
+                        enabled = !busy && prompt.isNotBlank(),
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        if (busy) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Отправить",
+                            )
+                        }
                     }
                 }
-            },
-            enabled = !busy,
-            modifier = Modifier.align(Alignment.End)
-        ) {
-            Text(if (busy) "…" else "Отправить")
-        }
-        HorizontalDivider()
-        Text(
-            text = reply.ifBlank { "Ответ появится здесь." },
+            }
+        },
+    ) { innerPadding ->
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-        )
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            AnimatedVisibility(
+                visible = settingsOpen,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                OutlinedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Подключение",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = "Адрес HTTP-канала агента в локальной сети",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
+                        )
+                        OutlinedTextField(
+                            value = host,
+                            onValueChange = { host = it },
+                            label = { Text("Хост:порт") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = "Пример: 192.168.2.107:8080",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+            }
+
+            if (messages.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Отправьте сообщение агенту",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
+                ) {
+                    items(messages) { msg ->
+                        val isUser = msg.role == "user"
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+                        ) {
+                            Surface(
+                                color = if (isUser) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.widthIn(max = 320.dp),
+                            ) {
+                                Text(
+                                    text = msg.text,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.padding(12.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
