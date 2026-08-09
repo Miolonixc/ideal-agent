@@ -1,0 +1,9 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <circle android:cx="34" android:cy="54" android:r="10" android:fillColor="#FFFFFF" />
+    <circle android:cx="54" android:cy="54" android:r="10" android:fillColor="#FFFFFF" />
+    <circle android:cx="74" android:cy="54" android:r="10" android:fillColor="#FFFFFF" />
+</vector>

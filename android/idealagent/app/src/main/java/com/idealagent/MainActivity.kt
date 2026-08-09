@@ -176,7 +176,7 @@ fun ChatScreen() {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
                         top = 12.dp,
-                        bottom = 8.dp,
+                        bottom = 12.dp,
                     ),
                 ) {
                     items(messages) { msg ->
@@ -211,7 +211,7 @@ fun ChatScreen() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+                    .padding(start = 10.dp, end = 10.dp, bottom = 14.dp),
             ) {
                 Row(
                     modifier = Modifier

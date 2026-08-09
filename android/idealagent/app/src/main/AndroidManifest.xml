@@ -5,6 +5,8 @@
 
     <application
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="ideal-agent"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
@@ -12,7 +14,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="ideal-agent">
+            android:label="ideal-agent"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
