@@ -479,7 +479,7 @@ fun ChatScreen() {
                     ) {
                         Box {
                             IconButton(onClick = { attachMenu = true }) {
-                                Icon(androidx.compose.material.icons.filled.Add, contentDescription = "Прикрепить файл/скрин")
+                                Text("+", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
                                 DropdownMenuItem(
