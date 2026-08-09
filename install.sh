@@ -3,6 +3,18 @@ set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
 DEST="${1:-}"
+
+# если скрипт запущен не из репозитория (например, curl | bash), подтянем исходники
+if [ ! -d "$SRC/agent" ]; then
+    echo "исходники не найдены рядом — клонирую репозиторий..."
+    REPO_URL="${IDEAL_REPO:-https://github.com/Miolonixc/ideal-agent.git}"
+    CLONE_DIR="$(mktemp -d)"
+    if ! git clone --depth 1 "$REPO_URL" "$CLONE_DIR" 2>/dev/null; then
+        echo "ошибка: не удалось клонировать $REPO_URL (нужен git + сеть)" >&2
+        exit 1
+    fi
+    SRC="$CLONE_DIR"
+fi
 CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ideal-agent"
 
 # --- определение платформы ---
@@ -100,6 +112,7 @@ fi
 
 # --- установка сервиса (автозапуск) ---
 SERVICE="${2:-${SERVICE:-}}"
+CHANNEL="${IDEAL_CHANNEL:-telegram}"
 if [ "$SERVICE" = "--service" ] || [ "$SERVICE" = "1" ]; then
     case "$PLATFORM" in
         termux)
@@ -113,7 +126,12 @@ cd "$DEST"
 if ! pgrep -f "python3 -u main.py" >/dev/null 2>&1; then
   export TELEGRAM_BOT_TOKEN="$TOK"
   export IDEAL_LLM_API_KEY="${IDEAL_LLM_API_KEY:-}"
-  nohup python3 -u main.py > "\$HOME/logs/ideal-agent-telegram.log" 2>&1 &
+  export IDEAL_HTTP_HOST=0.0.0.0
+  if [ "$CHANNEL" = "http" ]; then
+    nohup python3 -u main.py http > "\$HOME/logs/ideal-agent-http.log" 2>&1 &
+  else
+    nohup python3 -u main.py > "\$HOME/logs/ideal-agent-telegram.log" 2>&1 &
+  fi
 fi
 SH
             chmod +x "$BOOT/ideal-agent.sh"
@@ -178,5 +196,11 @@ cat <<EOF
   python3 $DEST/main.py http --port 8080         # HTTP (компаньон/вебхуки)
   python3 $DEST/main.py ide                       # IDE (TCP 127.0.0.1:8765)
 
-Ключи окружения: IDEAL_LLM_API_KEY, TELEGRAM_BOT_TOKEN, GITHUB_TOKEN, IDEAL_PROVIDER.
+Ключи окружения: IDEAL_LLM_API_KEY, TELEGRAM_BOT_TOKEN, GITHUB_TOKEN, IDEAL_PROVIDER, IDEAL_CHANNEL.
+Автозапуск сервиса: bash install.sh --service            # Telegram (по умолчанию)
+                     IDEAL_CHANNEL=http bash install.sh --service   # HTTP-канал для Android-компаньона
+
+Android-компаньон (APK): скачай и установи из релиза —
+  https://github.com/Miolonixc/ideal-agent/releases
+В приложении укажи адрес агента: http://<LAN-IP-этого-телефона>:8080
 EOF
