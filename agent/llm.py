@@ -169,7 +169,19 @@ class AnthropicProvider:
                 continue
             content = m.get("content") or ""
             blocks = []
-            if content:
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        ptype = part.get("type")
+                        if ptype == "text":
+                            blocks.append({"type": "text", "text": part.get("text", "")})
+                        elif ptype == "image_url":
+                            url = part.get("image_url", {}).get("url", "")
+                            if url.startswith("data:") and ";base64," in url:
+                                meta, b64 = url.split(",", 1)
+                                media_type = meta[len("data:"):meta.index(";")] or "image/jpeg"
+                                blocks.append({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}})
+            elif content:
                 blocks.append({"type": "text", "text": content})
             for tc in m.get("tool_calls", []) or []:
                 fn = tc.get("function", {})
@@ -264,8 +276,21 @@ class GeminiProvider:
                 contents.append({"role": "user", "parts": [{"text": f"[tool result {m.get('tool_call_id')}]: {m.get('content')}"}]})
                 continue
             parts = []
-            if m.get("content"):
-                parts.append({"text": m["content"]})
+            content = m.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        ptype = part.get("type")
+                        if ptype == "text":
+                            parts.append({"text": part.get("text", "")})
+                        elif ptype == "image_url":
+                            url = part.get("image_url", {}).get("url", "")
+                            if url.startswith("data:") and ";base64," in url:
+                                meta, b64 = url.split(",", 1)
+                                mime = meta[len("data:"):meta.index(";")] or "image/jpeg"
+                                parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+            elif content:
+                parts.append({"text": content})
             for tc in m.get("tool_calls", []) or []:
                 fn = tc.get("function", {})
                 try:

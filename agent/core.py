@@ -1,9 +1,10 @@
 from __future__ import annotations
+import base64
 import json
 import os
 import re
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from . import llm as llm_mod
 from . import builtin_tools
@@ -13,6 +14,29 @@ from .tools import ToolRegistry
 
 
 MAX_ITER = 12
+
+
+def _content_to_text(content):
+    """Превращает content сообщения (str или список частей) в текст для
+    подсчёта токенов и сжатия истории."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        out = []
+        for part in content:
+            if isinstance(part, dict):
+                if part.get("type") == "text":
+                    out.append(part.get("text", ""))
+                elif part.get("type") == "image_url":
+                    out.append("[изображение]")
+                else:
+                    out.append(str(part))
+            else:
+                out.append(str(part))
+        return "\n".join(out)
+    return str(content)
 
 
 class HistoryManager:
@@ -28,7 +52,7 @@ class HistoryManager:
         total = 0
         for m in self.messages:
             total += self.provider.count_tokens(
-                (m.get("content") or "") + json.dumps(m.get("tool_calls") or "")
+                _content_to_text(m.get("content")) + json.dumps(m.get("tool_calls") or "")
             )
         return total
 
@@ -38,7 +62,7 @@ class HistoryManager:
         keep = self.messages[-3:]
         to_sum = self.messages[:-3]
         text = "\n".join(
-            f"{m.get('role')}: {m.get('content') or ''}" for m in to_sum
+            f"{m.get('role')}: {_content_to_text(m.get('content'))}" for m in to_sum
         )
         summary = self.provider.complete(
             [
@@ -215,8 +239,35 @@ class Agent:
             self.audit.record(decision, name, args, result)
             self.history.add({"role": "tool", "tool_call_id": tc_id, "content": result})
 
-    def run(self, text):
-        self.history.add({"role": "user", "content": text})
+    def _build_user_message(self, text, attachments):
+        if not attachments:
+            return {"role": "user", "content": text}
+        parts = []
+        if text:
+            parts.append({"type": "text", "text": text})
+        for att in attachments:
+            kind = att.get("kind")
+            if kind == "image":
+                try:
+                    with open(att["path"], "rb") as f:
+                        b64 = base64.b64encode(f.read()).decode()
+                    mime = att.get("mime") or "image/jpeg"
+                    parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+                except Exception:
+                    parts.append({"type": "text", "text": f"[не удалось прочитать изображение {att.get('name', '')}]"})
+            elif kind == "text":
+                try:
+                    with open(att["path"], "r", errors="replace") as f:
+                        body = f.read()
+                except Exception:
+                    body = ""
+                parts.append({"type": "text", "text": f"[содержимое файла {att.get('name', '')}]:\n{body}"})
+            else:
+                parts.append({"type": "text", "text": f"[файл {att.get('name', '')} сохранён по пути {att['path']} — при необходимости прочитай его]"})
+        return {"role": "user", "content": parts}
+
+    def run(self, text, attachments=None):
+        self.history.add(self._build_user_message(text, attachments))
         self._ensure_context()
         self._inject_context(text)
         for _ in range(MAX_ITER):
@@ -234,9 +285,9 @@ class Agent:
             return reply
         return "[достигнут лимит итераций]"
 
-    def stream(self, text):
+    def stream(self, text, attachments=None):
         """Генератор: yield куски ответа по мере генерации (streaming)."""
-        self.history.add({"role": "user", "content": text})
+        self.history.add(self._build_user_message(text, attachments))
         self._ensure_context()
         self._inject_context(text)
         for _ in range(MAX_ITER):

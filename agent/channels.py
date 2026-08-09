@@ -1,6 +1,9 @@
 from __future__ import annotations
+import base64
 import json
+import os
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -351,6 +354,47 @@ class HTTPChannel(Channel):
     def write(self, msg: Message):
         raise NotImplementedError("HTTPChannel использует run(agent)")
 
+    @staticmethod
+    def _prepare_attachments(data):
+        """Извлекает вложения из JSON-поля attachments (base64) во временные
+        файлы и возвращает список словарей для agent.run/stream.
+        Формат элемента: {"name": str, "mime": str, "data": <base64 str>}."""
+        atts = data.get("attachments") or []
+        if not atts:
+            return None
+        out = []
+        d = tempfile.mkdtemp(prefix="ideal-att-")
+        for i, a in enumerate(atts):
+            if not isinstance(a, dict):
+                continue
+            raw = a.get("data")
+            if not raw:
+                continue
+            try:
+                blob = base64.b64decode(raw)
+            except Exception:
+                continue
+            name = (a.get("name") or f"file{i}").replace("/", "_")
+            mime = a.get("mime") or "application/octet-stream"
+            path = os.path.join(d, name)
+            try:
+                with open(path, "wb") as f:
+                    f.write(blob)
+            except Exception:
+                continue
+            if mime.startswith("image/"):
+                kind = "image"
+            elif mime.startswith("text/") or name.lower().endswith(
+                (".txt", ".md", ".py", ".json", ".csv", ".log", ".xml", ".yaml",
+                 ".yml", ".sh", ".kt", ".java", ".js", ".ts", ".html", ".css",
+                 ".go", ".rs", ".c", ".cpp", ".h", ".toml", ".ini", ".env")
+            ):
+                kind = "text"
+            else:
+                kind = "binary"
+            out.append({"kind": kind, "name": name, "mime": mime, "path": path})
+        return out or None
+
     def run(self, agent):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -403,10 +447,11 @@ class HTTPChannel(Channel):
                         override = None
                 if self.path == "/message":
                     text = (data.get("text") or "").strip()
-                    if not text:
+                    attachments = self._prepare_attachments(data)
+                    if not text and not attachments:
                         self._send(400, {"ok": False, "error": "empty text"})
                         return
-                    cmd = bot._agent.command(text)
+                    cmd = bot._agent.command(text) if text else None
                     if cmd == "__EXIT__":
                         self._send(200, {"ok": True, "reply": "bye"})
                         return
@@ -418,11 +463,11 @@ class HTTPChannel(Channel):
                             saved = bot._agent.provider
                             bot._agent.provider = override
                             try:
-                                reply = bot._agent.run(text)
+                                reply = bot._agent.run(text, attachments=attachments)
                             finally:
                                 bot._agent.provider = saved
                         else:
-                            reply = bot._agent.run(text)
+                            reply = bot._agent.run(text, attachments=attachments)
                     except Exception as e:
                         reply = f"[ошибка агента] {e}"
                     self._send(200, {"ok": True, "reply": reply, "chat_id": "http"})
@@ -439,10 +484,11 @@ class HTTPChannel(Channel):
                     self._send(200, {"ok": True})
                 elif self.path == "/message/stream":
                     text = (data.get("text") or "").strip()
-                    if not text:
+                    attachments = self._prepare_attachments(data)
+                    if not text and not attachments:
                         self._send(400, {"ok": False, "error": "empty text"})
                         return
-                    cmd = bot._agent.command(text)
+                    cmd = bot._agent.command(text) if text else None
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                     self.send_header("Cache-Control", "no-cache")
@@ -459,7 +505,7 @@ class HTTPChannel(Channel):
                                 saved = bot._agent.provider
                                 bot._agent.provider = override
                             try:
-                                for chunk in bot._agent.stream(text):
+                                for chunk in bot._agent.stream(text, attachments=attachments):
                                     self.wfile.write(b"data: " + json.dumps({"chunk": chunk}, ensure_ascii=False).encode() + b"\n\n")
                                     self.wfile.flush()
                             finally:

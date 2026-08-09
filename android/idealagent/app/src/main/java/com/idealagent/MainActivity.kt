@@ -6,8 +6,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import java.io.ByteArrayOutputStream
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -103,6 +109,8 @@ class MainActivity : ComponentActivity() {
 }
 
 data class Message(val role: String, val text: String)
+
+data class Attachment(val name: String, val mime: String, val bytes: ByteArray)
 
 // ---- Провайдеры (с бесплатными опциями) ----
 data class ProviderInfo(
@@ -278,6 +286,31 @@ fun openUrl(ctx: Context, url: String) {
     }
 }
 
+fun uriToAttachment(ctx: Context, uri: Uri): Attachment? {
+    return try {
+        val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+        val name = try {
+            ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (i >= 0 && c.moveToFirst()) c.getString(i) else null
+            }
+        } catch (_: Exception) { null } ?: "file"
+        val bytes = if (mime.startsWith("image/")) {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+            val scale = (maxOf(opts.outWidth, opts.outHeight, 1) / 1600f).coerceAtLeast(1f)
+            val opts2 = BitmapFactory.Options().apply { inSampleSize = scale.toInt().coerceAtLeast(1) }
+            val bmp = ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts2) } ?: return null
+            val out = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)
+            out.toByteArray()
+        } else {
+            ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        }
+        Attachment(name, mime, bytes)
+    } catch (_: Exception) { null }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen() {
@@ -291,7 +324,19 @@ fun ChatScreen() {
     var busy by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     val messages = remember { mutableStateListOf<Message>() }
+    val attachments = remember { mutableStateListOf<Attachment>() }
+    var attachMenu by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        uris.forEach { uri -> uriToAttachment(context, uri)?.let { attachments.add(it) } }
+    }
+    val camLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp ->
+        bmp?.let {
+            val out = ByteArrayOutputStream()
+            it.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            attachments.add(Attachment("camera_${System.currentTimeMillis()}.jpg", "image/jpeg", out.toByteArray()))
+        }
+    }
     val listState = rememberLazyListState()
 
     LaunchedEffect(host) { prefs.edit().putString("host", host).apply() }
@@ -300,13 +345,15 @@ fun ChatScreen() {
     LaunchedEffect(apiKey) { prefs.edit().putString("api_key", apiKey).apply() }
 
     fun send() {
-        if (busy || prompt.isBlank()) return
+        if (busy || (prompt.isBlank() && attachments.isEmpty())) return
         val h = host; val p = prompt; val pv = provider; val md = model; val key = apiKey
+        val atts = attachments.toList()
         prompt = ""
-        messages.add(Message("user", p))
+        attachments.clear()
+        messages.add(Message("user", if (p.isBlank()) "(вложение)" else p))
         busy = true
         scope.launch {
-            val r = askAgent(h, p, pv, md, key)
+            val r = askAgent(h, p, pv, md, key, atts)
             messages.add(Message("agent", r))
             busy = false
         }
@@ -402,34 +449,71 @@ fun ChatScreen() {
                     .navigationBarsPadding()
                     .padding(start = 10.dp, end = 10.dp, bottom = 14.dp),
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.Bottom,
                 ) {
-                    OutlinedTextField(
-                        value = prompt,
-                        onValueChange = { prompt = it },
-                        label = { Text("Сообщение агенту") },
-                        singleLine = false,
-                        minLines = 1,
-                        maxLines = 4,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            imeAction = androidx.compose.ui.text.input.ImeAction.Send,
-                        ),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
-                        modifier = Modifier.weight(1f).padding(end = 8.dp),
-                    )
-                    FilledIconButton(
-                        onClick = { send() },
-                        enabled = !busy && prompt.isNotBlank(),
-                        modifier = Modifier.size(48.dp),
+                    if (attachments.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            attachments.forEachIndexed { idx, a ->
+                                AssistChip(
+                                    onClick = { attachments.removeAt(idx) },
+                                    label = { Text(a.name, style = MaterialTheme.typography.labelSmall) },
+                                    trailingIcon = {
+                                        Icon(Icons.Filled.Delete, contentDescription = "Убрать", modifier = Modifier.size(14.dp))
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Bottom,
                     ) {
-                        if (busy) {
-                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
-                        } else {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить")
+                        Box {
+                            IconButton(onClick = { attachMenu = true }) {
+                                Icon(androidx.compose.material.icons.filled.AttachFile, contentDescription = "Прикрепить файл/скрин")
+                            }
+                            DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Галерея / файл") },
+                                    onClick = { attachMenu = false; pickLauncher.launch("*/*") },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Камера") },
+                                    onClick = { attachMenu = false; camLauncher.launch(null) },
+                                )
+                            }
+                        }
+                        OutlinedTextField(
+                            value = prompt,
+                            onValueChange = { prompt = it },
+                            label = { Text("Сообщение агенту") },
+                            singleLine = false,
+                            minLines = 1,
+                            maxLines = 4,
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                imeAction = androidx.compose.ui.text.input.ImeAction.Send,
+                            ),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                        )
+                        FilledIconButton(
+                            onClick = { send() },
+                            enabled = !busy && (prompt.isNotBlank() || attachments.isNotEmpty()),
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            if (busy) {
+                                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                            } else {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить")
+                            }
                         }
                     }
                 }
@@ -729,7 +813,7 @@ fun SettingsPanel(
     }
 }
 
-suspend fun askAgent(host: String, prompt: String, provider: String, model: String, apiKey: String): String {
+suspend fun askAgent(host: String, prompt: String, provider: String, model: String, apiKey: String, attachments: List<Attachment> = emptyList()): String {
     return withContext(Dispatchers.IO) {
         try {
             val url = URL("http://$host/message")
@@ -744,6 +828,17 @@ suspend fun askAgent(host: String, prompt: String, provider: String, model: Stri
             if (provider.isNotBlank()) obj.put("provider", provider)
             if (model.isNotBlank()) obj.put("model", model)
             if (apiKey.isNotBlank()) obj.put("api_key", apiKey)
+            if (attachments.isNotEmpty()) {
+                val arr = org.json.JSONArray()
+                for (a in attachments) {
+                    val o = JSONObject()
+                    o.put("name", a.name)
+                    o.put("mime", a.mime)
+                    o.put("data", Base64.encodeToString(a.bytes, Base64.NO_WRAP))
+                    arr.put(o)
+                }
+                obj.put("attachments", arr)
+            }
             conn.outputStream.write(obj.toString().toByteArray())
             val code = conn.responseCode
             if (code == 200) {
