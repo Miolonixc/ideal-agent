@@ -55,7 +55,7 @@ def load_skills(registry, skills_dir: str) -> List[str]:
                         )
                         return (r.stdout or r.stderr)[:4000]
                     except Exception as e:
-                        return f"error: {e}"
+                        return f"ошибка: {e}"
                 return desc[:4000]
             return handler
 

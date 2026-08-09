@@ -66,7 +66,7 @@ def run_sandboxed(command: str, timeout: int = 30) -> str:
             wrapped, shell=True, capture_output=True, text=True, timeout=timeout
         )
     except subprocess.TimeoutExpired:
-        return "error: timeout"
+        return "ошибка: таймаут"
     out = r.stdout
     if r.returncode != 0:
         out += "\n[stderr]\n" + r.stderr

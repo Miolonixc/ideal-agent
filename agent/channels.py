@@ -153,13 +153,13 @@ class TUIChannel(Channel):
             curses.init_pair(3, curses.COLOR_YELLOW, -1)
             curses.init_pair(4, curses.COLOR_RED, -1)
             curses.init_pair(5, curses.COLOR_WHITE, -1)
-        except curses.error:
+        except curses.ошибка:
             pass
 
         def c(n):
             try:
                 return curses.color_pair(n)
-            except curses.error:
+            except curses.ошибка:
                 return 0
 
         h, w = stdscr.getmaxyx()
@@ -178,12 +178,12 @@ class TUIChannel(Channel):
             inp.box()
             try:
                 inp.addstr(0, 2, " ввод (Ctrl+D выход) ", c(5) | curses.A_BOLD)
-            except curses.error:
+            except curses.ошибка:
                 pass
             prompt = "> " + buf
             try:
                 inp.addstr(1, 1, prompt[: w - 2], c(2))
-            except curses.error:
+            except curses.ошибка:
                 pass
             inp.noutrefresh()
 
@@ -193,7 +193,7 @@ class TUIChannel(Channel):
             try:
                 stdscr.addstr(0, 0, title, c(1) | curses.A_BOLD)
                 stdscr.addstr(0, len(title), " " * (w - len(title) - 1), c(5))
-            except curses.error:
+            except curses.ошибка:
                 pass
             stdscr.noutrefresh()
 
@@ -201,7 +201,7 @@ class TUIChannel(Channel):
             footer = " ↑/↓ история · Enter отправить · Ctrl+D выход "
             try:
                 stdscr.addstr(h - 1, 0, footer[: w - 1], c(3))
-            except curses.error:
+            except curses.ошибка:
                 pass
             stdscr.noutrefresh()
 
@@ -219,7 +219,7 @@ class TUIChannel(Channel):
                         hist.addstr(1 + i, 1, ln[: w - 2], c(1))
                     else:
                         hist.addstr(1 + i, 1, ln[: w - 2], c(5))
-                except curses.error:
+                except curses.ошибка:
                     pass
             hist.noutrefresh()
             draw_footer()

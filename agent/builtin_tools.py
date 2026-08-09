@@ -30,12 +30,12 @@ def register_builtin_tools(registry, cfg):
     def read_file(args):
         p = _check(args.get("path", ""), roots)
         if not p:
-            return "error: " + ALLOWED_NOTE
+            return "ошибка: " + ALLOWED_NOTE
         try:
             with open(p, encoding="utf-8") as f:
                 data = f.read()
         except Exception as e:
-            return f"error: {e}"
+            return f"ошибка: {e}"
         limit = int(args.get("limit", 0) or 0)
         if limit > 0:
             data = "\n".join(data.splitlines()[:limit])
@@ -44,28 +44,28 @@ def register_builtin_tools(registry, cfg):
     def write_file(args):
         p = _check(args.get("path", ""), roots)
         if not p:
-            return "error: " + ALLOWED_NOTE
+            return "ошибка: " + ALLOWED_NOTE
         try:
             os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
                 f.write(args.get("content", ""))
         except Exception as e:
-            return f"error: {e}"
+            return f"ошибка: {e}"
         return f"записано: {p}"
 
     def edit_file(args):
         p = _check(args.get("path", ""), roots)
         if not p:
-            return "error: " + ALLOWED_NOTE
+            return "ошибка: " + ALLOWED_NOTE
         old = args.get("old_string", "")
         new = args.get("new_string", "")
         try:
             with open(p, encoding="utf-8") as f:
                 data = f.read()
         except Exception as e:
-            return f"error: {e}"
+            return f"ошибка: {e}"
         if old not in data:
-            return "error: old_string не найдена"
+            return "ошибка: old_string не найдена"
         data = data.replace(old, new, 1)
         with open(p, "w", encoding="utf-8") as f:
             f.write(data)
@@ -85,7 +85,7 @@ def register_builtin_tools(registry, cfg):
         path = args.get("path", roots[0])
         rp = _check(path, roots) or os.path.realpath(os.path.expanduser(path))
         if not os.path.isdir(rp):
-            return "error: path не каталог"
+            return "ошибка: path не каталог"
         rx = re.compile(pat)
         res = []
         for dp, _, fs in os.walk(rp):

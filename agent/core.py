@@ -162,11 +162,11 @@ class Agent:
             for h in self.repo_index.search(text, top_k=3):
                 meta = h.get("meta") or {}
                 parts.append(
-                    f"[file {meta.get('path')}:{meta.get('start', 0)}]\n{h['text'][:500]}"
+                    f"[файл {meta.get('path')}:{meta.get('start', 0)}]\n{h['text'][:500]}"
                 )
         if self.memory:
             for f in self.memory.recall(text, top_k=3):
-                parts.append(f"[memory] {f['text']}")
+                parts.append(f"[память] {f['text']}")
         return "\n\n".join(parts)
 
     def _inject_context(self, text):
@@ -227,13 +227,13 @@ class Agent:
         for tc_id, name, args in tool_calls:
             decision, reason = self.gate.decide(name, args)
             if decision == "deny":
-                result = f"error: запрещено ({reason})"
+                result = f"ошибка: запрещено ({reason})"
             elif decision == "ask":
                 if sys.stdin.isatty():
                     ans = input(f"разрешить {name}({args})? [y/N] ")
-                    result = self.registry.call(name, args) if ans.lower() == "y" else "error: отклонено пользователем"
+                    result = self.registry.call(name, args) if ans.lower() == "y" else "ошибка: отклонено пользователем"
                 else:
-                    result = "error: требуется подтверждение (нет TTY)"
+                    result = "ошибка: требуется подтверждение (нет TTY)"
             else:
                 result = self.registry.call(name, args)
             self.audit.record(decision, name, args, result)
