@@ -112,7 +112,7 @@ def serve(channel: Channel, agent, stop_on_none: bool = True):
             try:
                 channel.write(Message(cmd_reply, msg.chat_id))
             except Exception as e:
-                print("write error:", e)
+                print("ошибка отправки:", e)
             continue
         try:
             reply = agent.run(msg.text)
@@ -123,7 +123,7 @@ def serve(channel: Channel, agent, stop_on_none: bool = True):
         try:
             channel.write(Message(reply, msg.chat_id))
         except Exception as e:
-            print("write error:", e)
+            print("ошибка отправки:", e)
 
 
 class TUIChannel(Channel):
@@ -141,7 +141,7 @@ class TUIChannel(Channel):
         try:
             curses.wrapper(self._loop, agent)
         except Exception as e:
-            print("TUI error:", e)
+            print("ошибка TUI:", e)
 
     def _loop(self, stdscr, agent):
         agent.gate.mode = "full-auto"
@@ -480,7 +480,7 @@ class HTTPChannel(Channel):
                     try:
                         bot._agent.run(text)
                     except Exception as e:
-                        print("github webhook agent error:", e)
+                        print("ошибка агента (github webhook):", e)
                     self._send(200, {"ok": True})
                 elif self.path == "/message/stream":
                     text = (data.get("text") or "").strip()
@@ -518,7 +518,7 @@ class HTTPChannel(Channel):
                 else:
                     self._send(404, {"ok": False, "error": "not found"})
 
-        print(f"HTTP channel: http://{self.host}:{self.port} (message + github webhook)")
+        print(f"HTTP-канал запущен: http://{self.host}:{self.port} (сообщения + github webhook)")
         srv = ThreadingHTTPServer((self.host, self.port), Handler)
         try:
             srv.serve_forever()

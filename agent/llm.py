@@ -228,7 +228,7 @@ class AnthropicProvider:
                 timeout=self.timeout,
             )
         except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Anthropic HTTP {e.code}: {e.read().decode()[:300]}")
+            raise RuntimeError(f"Ошибка Anthropic (HTTP {e.code}): {e.read().decode()[:300]}")
         text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
         tool_calls = []
         for b in resp.get("content", []):
@@ -324,7 +324,7 @@ class GeminiProvider:
         try:
             resp = _post(url, body, {"Content-Type": "application/json"}, timeout=self.timeout)
         except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Gemini HTTP {e.code}: {e.read().decode()[:300]}")
+            raise RuntimeError(f"Ошибка Gemini (HTTP {e.code}): {e.read().decode()[:300]}")
         text = ""
         tool_calls = []
         for c in resp.get("candidates", [{}])[0].get("content", {}).get("parts", []):

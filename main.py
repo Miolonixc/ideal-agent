@@ -55,7 +55,7 @@ def main():
     skills_dir = os.environ.get("SKILLS_DIR") or cfg.skills_dir
     if skills_dir:
         loaded = agent.load_skills_dir(skills_dir)
-        print("skills:", loaded)
+        print("навыки:", loaded)
 
     mcp_specs = os.environ.get("MCP_SERVERS")
     specs = mcp_specs.split("|") if mcp_specs else cfg.mcp_servers
@@ -95,7 +95,7 @@ def main():
         allowed_env = [int(x) for x in os.environ.get("ALLOWED_USER_IDS", "").replace(",", " ").split() if x]
         allowed = allowed_env or tg_cfg.get("allowed", [])
         channel = TelegramChannel(token, allowed=allowed)
-        print("telegram channel: запущен long-poll")
+        print("telegram-канал: запущен long-poll")
         serve(channel, agent)
         return
 
