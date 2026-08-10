@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import hashlib
 import math
 import os
 import re
@@ -20,6 +21,16 @@ def state_dir() -> str:
     d = os.path.expanduser("~/.local/state/ideal-agent")
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def workspace_namespace(workspace: str) -> str:
+    """Стабильный, нераскрывающий путь идентификатор проекта."""
+    canonical = os.path.realpath(os.path.abspath(os.path.expanduser(workspace)))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:20]
+
+
+def workspace_db_path(kind: str, workspace: str) -> str:
+    return os.path.join(state_dir(), f"{kind}-{workspace_namespace(workspace)}.db")
 
 
 def tokenize(text: str) -> List[str]:

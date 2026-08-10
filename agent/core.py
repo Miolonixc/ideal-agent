@@ -182,12 +182,12 @@ class Agent:
         self._context_ready = True
         ws = self.cfg.workspace
         if os.path.isdir(ws):
-            self.repo_index = memory_mod.RepoIndex()
+            self.repo_index = memory_mod.RepoIndex(memory_mod.workspace_db_path("repo_index", ws))
             try:
                 self.repo_index.build(ws)
             except Exception:
                 self.repo_index = None
-        self.memory = memory_mod.MemoryStore()
+        self.memory = memory_mod.MemoryStore(memory_mod.workspace_db_path("memory", ws))
 
     def _retrieve(self, text):
         parts = []

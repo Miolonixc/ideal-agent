@@ -10,7 +10,7 @@ from unittest import mock
 from agent.config import AgentConfig, load, save_runtime_settings
 from agent.core import Agent
 from agent.llm import OpenAICompatible, ProviderError
-from agent.memory import RepoIndex, MemoryStore
+from agent.memory import RepoIndex, MemoryStore, workspace_namespace
 from agent.safety import ApprovalGate, AuditLog, make_diff
 from agent.skills import load_skills
 from agent.tools import ToolRegistry
@@ -153,6 +153,11 @@ class TestCore(unittest.TestCase):
 
 
 class TestMemory(unittest.TestCase):
+    def test_workspace_namespace_is_canonical_and_distinct(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:
+            self.assertEqual(workspace_namespace(d), workspace_namespace(os.path.join(d, ".")))
+            self.assertNotEqual(workspace_namespace(d), workspace_namespace(other))
+
     def test_repo_and_kv(self):
         d = tempfile.mkdtemp()
         with open(os.path.join(d, "a.py"), "w") as f:

@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+import uuid
 
 
 class TestContext(unittest.TestCase):
@@ -57,6 +58,25 @@ class TestContext(unittest.TestCase):
         joined = " ".join(m["content"] for m in systems)
         self.assertNotIn("[файл", joined)
         self.assertNotIn("[память]", joined)
+
+    def test_memory_isolated_between_workspaces(self):
+        from agent.config import AgentConfig
+        from agent.core import Agent
+        first, second = tempfile.mkdtemp(), tempfile.mkdtemp()
+        unique = "workspace-only-" + uuid.uuid4().hex
+        a = Agent(AgentConfig(workspace=first, use_context=True))
+        b = Agent(AgentConfig(workspace=second, use_context=True))
+        try:
+            a._ensure_context()
+            b._ensure_context()
+            a.memory.add("auto", unique, unique)
+            self.assertTrue(a.memory.recall(unique))
+            self.assertFalse(b.memory.recall(unique))
+            self.assertNotEqual(a.memory.db_path, b.memory.db_path)
+            self.assertNotEqual(a.repo_index.db_path, b.repo_index.db_path)
+        finally:
+            a.close()
+            b.close()
 
 
 if __name__ == "__main__":
