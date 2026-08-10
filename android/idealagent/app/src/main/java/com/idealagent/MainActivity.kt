@@ -1,30 +1,36 @@
 package com.idealagent
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
-import android.os.Bundle
-import android.provider.OpenableColumns
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
-import android.util.Base64
-import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import android.app.Activity
 import android.media.ImageReader
 import android.media.projection.MediaProjectionManager
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
-import kotlinx.coroutines.delay
-import java.io.ByteArrayOutputStream
+import android.provider.OpenableColumns
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import android.util.Base64
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -34,6 +40,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,14 +63,19 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -82,8 +94,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -94,6 +106,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -105,12 +118,21 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -122,6 +144,8 @@ class MainActivity : ComponentActivity() {
 data class Message(val role: String, val text: String)
 
 data class Attachment(val name: String, val mime: String, val bytes: ByteArray)
+
+data class Session(val id: String, var name: String, val messages: MutableList<Message>)
 
 // ---- Провайдеры (с бесплатными опциями) ----
 data class ProviderInfo(
@@ -188,9 +212,11 @@ data class Paragraph(val lines: List<String>) : MdBlock()
 data class BulletList(val items: List<String>) : MdBlock()
 data class OrderedList(val items: List<String>) : MdBlock()
 data class Quote(val text: String) : MdBlock()
+data class ImageBlock(val alt: String, val url: String) : MdBlock()
 object Hr : MdBlock()
 
 private val RE_BLOCK = Regex("^\\s*(#{1,6}\\s+|>|[-*]\\s+|\\d+\\.\\s+|```|-{3,}|\\*{3,})")
+private val RE_IMG = Regex("^!\\[(.*?)\\]\\((.+?)\\)$")
 
 fun parseMarkdown(src: String): List<MdBlock> {
     val lines = src.replace("\r\n", "\n").split("\n")
@@ -198,6 +224,12 @@ fun parseMarkdown(src: String): List<MdBlock> {
     var i = 0
     while (i < lines.size) {
         val line = lines[i]
+        val img = RE_IMG.matchEntire(line)
+        if (img != null) {
+            out.add(ImageBlock(img.groupValues[1], img.groupValues[2]))
+            i++
+            continue
+        }
         when {
             line.startsWith("```") -> {
                 val lang = line.removePrefix("```").trim()
@@ -206,7 +238,7 @@ fun parseMarkdown(src: String): List<MdBlock> {
                 while (i < lines.size && !lines[i].startsWith("```")) {
                     buf.appendLine(lines[i]); i++
                 }
-                i++ // закрывающий ```
+                i++
                 out.add(CodeBlock(lang, buf.toString().trimEnd('\n')))
             }
             line.matches(Regex("^#{1,6}\\s+.*")) -> {
@@ -367,22 +399,95 @@ fun captureScreen(ctx: Context, data: Intent, onCaptured: (Attachment) -> Unit) 
     } catch (_: Exception) { }
 }
 
+fun securePrefs(ctx: Context): SharedPreferences {
+    return try {
+        val master = MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        EncryptedSharedPreferences.create(
+            ctx,
+            "ideal_agent_secure",
+            master,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    } catch (_: Exception) {
+        ctx.getSharedPreferences("ideal_agent", Context.MODE_PRIVATE)
+    }
+}
+
+fun loadSessions(ctx: Context): List<Session> {
+    return try {
+        val f = File(ctx.filesDir, "sessions.json")
+        if (!f.exists()) return emptyList()
+        val arr = JSONArray(f.readText())
+        val out = mutableListOf<Session>()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val msgs = mutableListOf<Message>()
+            val ma = o.getJSONArray("messages")
+            for (j in 0 until ma.length()) {
+                val m = ma.getJSONObject(j)
+                msgs.add(Message(m.getString("role"), m.getString("text")))
+            }
+            out.add(Session(o.getString("id"), o.optString("name", "Чат"), msgs))
+        }
+        out
+    } catch (_: Exception) { emptyList() }
+}
+
+fun saveSessions(ctx: Context, list: List<Session>) {
+    try {
+        val arr = JSONArray()
+        for (s in list) {
+            val o = JSONObject()
+            o.put("id", s.id)
+            o.put("name", s.name)
+            val ma = JSONArray()
+            for (m in s.messages) {
+                val mo = JSONObject()
+                mo.put("role", m.role)
+                mo.put("text", m.text)
+                ma.put(mo)
+            }
+            o.put("messages", ma)
+            arr.put(o)
+        }
+        File(ctx.filesDir, "sessions.json").writeText(arr.toString())
+    } catch (_: Exception) { }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("ideal_agent", Context.MODE_PRIVATE) }
+    val secure = remember { securePrefs(context) }
     var host by remember { mutableStateOf(prefs.getString("host", "192.168.2.107:8080") ?: "192.168.2.107:8080") }
     var provider by remember { mutableStateOf(prefs.getString("provider", "") ?: "") }
     var model by remember { mutableStateOf(prefs.getString("model", "") ?: "") }
-    var apiKey by remember { mutableStateOf(prefs.getString("api_key", "") ?: "") }
+    var apiKey by remember { mutableStateOf(secure.getString("api_key", "") ?: "") }
     var prompt by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
-    val messages = remember { mutableStateListOf<Message>() }
     val attachments = remember { mutableStateListOf<Attachment>() }
     var attachMenu by remember { mutableStateOf(false) }
+    var sessionsMenu by remember { mutableStateOf(false) }
+    var ttsOn by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    val sessions = remember {
+        mutableStateListOf<Session>().apply {
+            val loaded = loadSessions(context)
+            if (loaded.isEmpty()) add(Session(UUID.randomUUID().toString(), "Чат 1", mutableListOf()))
+            else addAll(loaded)
+        }
+    }
+    var currentId by remember { mutableStateOf(sessions.first().id) }
+    val messages = remember { mutableStateListOf<Message>() }
+    LaunchedEffect(currentId) {
+        messages.clear()
+        messages.addAll(sessions.first { it.id == currentId }.messages)
+    }
+
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         uris.forEach { uri -> uriToAttachment(context, uri)?.let { attachments.add(it) } }
     }
@@ -402,20 +507,114 @@ fun ChatScreen() {
         val mgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projectionLauncher.launch(mgr.createScreenCaptureIntent())
     }
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startVoiceInput() else Toast.makeText(context, "Нет доступа к микрофону", Toast.LENGTH_SHORT).show()
+    }
+
+    val speechRecognizer = remember { runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull() }
+    val tts = remember { TextToSpeech(context) { status -> if (status == TextToSpeech.SUCCESS) { try { tts.language = Locale("ru") } catch (_: Exception) { } } } }
+    DisposableEffect(Unit) {
+        val listener = object : RecognitionListener {
+            override fun onReadyForSpeech(p: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(r: Float) {}
+            override fun onBufferReceived(b: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onError(e: Int) { Toast.makeText(context, "ошибка распознавания", Toast.LENGTH_SHORT).show() }
+            override fun onResults(r: Bundle?) {
+                val res = r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!res.isNullOrEmpty()) prompt = (prompt + " " + res[0]).trim()
+            }
+            override fun onPartialResults(r: Bundle?) {}
+            override fun onEvent(e: Int, p: Bundle?) {}
+        }
+        speechRecognizer?.setRecognitionListener(listener)
+        onDispose {
+            speechRecognizer?.destroy()
+            tts.shutdown()
+        }
+    }
+    fun startVoiceInput() {
+        if (speechRecognizer == null || !SpeechRecognizer.isRecognitionAvailable(context)) {
+            Toast.makeText(context, "Распознавание речи недоступно", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите")
+        }
+        try { speechRecognizer.startListening(intent) } catch (_: Exception) { }
+    }
+
     val listState = rememberLazyListState()
 
     LaunchedEffect(host) { prefs.edit().putString("host", host).apply() }
     LaunchedEffect(provider) { prefs.edit().putString("provider", provider).apply() }
     LaunchedEffect(model) { prefs.edit().putString("model", model).apply() }
-    LaunchedEffect(apiKey) { prefs.edit().putString("api_key", apiKey).apply() }
+    LaunchedEffect(apiKey) { secure.edit().putString("api_key", apiKey).apply() }
+
+    fun syncCurrent() {
+        val s = sessions.first { it.id == currentId }
+        s.messages.clear()
+        s.messages.addAll(messages)
+        saveSessions(context, sessions)
+    }
+    fun createNewSession() {
+        val s = Session(UUID.randomUUID().toString(), "Новый чат", mutableListOf())
+        sessions.add(s)
+        currentId = s.id
+    }
+    fun deleteSession(id: String) {
+        val idx = sessions.indexOfFirst { it.id == id }
+        if (idx < 0) return
+        sessions.removeAt(idx)
+        if (sessions.isEmpty()) sessions.add(Session(UUID.randomUUID().toString(), "Чат 1", mutableListOf()))
+        if (currentId == id) currentId = sessions.first().id
+        saveSessions(context, sessions)
+    }
+    fun fetchStatus(h: String) {
+        scope.launch {
+            val txt = withContext(Dispatchers.IO) {
+                try {
+                    val url = URL("http://$h/status")
+                    val c = url.openConnection() as HttpURLConnection
+                    c.connectTimeout = 5000
+                    c.readTimeout = 5000
+                    if (c.responseCode == 200) c.inputStream.bufferedReader().readText() else "HTTP ${c.responseCode}"
+                } catch (e: Exception) { "ошибка: ${e.message}" }
+            }
+            messages.add(Message("system", "Статус агента: $txt"))
+            syncCurrent()
+        }
+    }
 
     fun send() {
         if (busy || (prompt.isBlank() && attachments.isEmpty())) return
         val h = host; val p = prompt; val pv = provider; val md = model; val key = apiKey
         val atts = attachments.toList()
+        val trimmed = p.trim()
+        if (trimmed.startsWith("/")) {
+            when (trimmed) {
+                "/clear" -> { tts.stop(); messages.clear(); syncCurrent(); prompt = ""; attachments.clear(); return }
+                "/new" -> { tts.stop(); createNewSession(); prompt = ""; attachments.clear(); return }
+                "/help" -> {
+                    tts.stop()
+                    messages.add(Message("system", "Команды: /clear — очистить чат · /new — новый чат · /status — статус агента · /help — справка"))
+                    syncCurrent(); prompt = ""; attachments.clear(); return
+                }
+                "/status" -> { tts.stop(); prompt = ""; attachments.clear(); fetchStatus(h); return }
+                else -> { /* неизвестная команда — отправим текстом агенту */ }
+            }
+        }
         prompt = ""
         attachments.clear()
+        tts.stop()
         messages.add(Message("user", if (p.isBlank()) "(вложение)" else p))
+        if (messages.size == 1) {
+            val cur = sessions.first { it.id == currentId }
+            if (cur.name == "Новый чат" || cur.name == "Чат 1") cur.name = (if (p.isBlank()) "(вложение)" else p).take(24)
+        }
         val agentIdx = messages.size
         messages.add(Message("agent", ""))
         busy = true
@@ -424,9 +623,16 @@ fun ChatScreen() {
                 val cur = messages.getOrNull(agentIdx)?.text ?: ""
                 messages[agentIdx] = Message("agent", cur + chunk)
             }
-            if (messages.getOrNull(agentIdx)?.text.isNullOrBlank()) {
+            val reply = messages.getOrNull(agentIdx)?.text ?: ""
+            if (reply.isBlank()) {
                 messages[agentIdx] = Message("agent", "(нет ответа)")
+            } else if (ttsOn) {
+                val spoken = reply.replace(Regex("```[\\s\\S]*?```"), " ")
+                    .replace(Regex("!\\[.*?\\]\\(.*?\\)"), " ")
+                    .replace(Regex("[*_`#>]"), "").trim()
+                if (spoken.isNotBlank()) tts.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, null)
             }
+            syncCurrent()
             busy = false
         }
     }
@@ -440,8 +646,36 @@ fun ChatScreen() {
             TopAppBar(
                 title = { Text("ideal-agent") },
                 actions = {
+                    FilledIconButton(onClick = { sessionsMenu = true }) {
+                        Icon(Icons.Filled.List, contentDescription = "Сессии")
+                    }
+                    DropdownMenu(expanded = sessionsMenu, onDismissRequest = { sessionsMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("＋ Новый чат", fontWeight = FontWeight.Bold) },
+                            onClick = { sessionsMenu = false; createNewSession() },
+                        )
+                        sessions.forEach { s ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (s.id == currentId) "• ${s.name}" else s.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (s.id == currentId) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                },
+                                onClick = { sessionsMenu = false; if (s.id != currentId) currentId = s.id },
+                                trailingIcon = {
+                                    IconButton(onClick = { sessionsMenu = false; deleteSession(s.id) }) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "Удалить", modifier = Modifier.size(16.dp))
+                                    }
+                                },
+                            )
+                        }
+                    }
                     if (messages.isNotEmpty()) {
-                        FilledIconButton(onClick = { messages.clear() }) {
+                        FilledIconButton(onClick = {
+                            tts.stop(); messages.clear(); syncCurrent()
+                        }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Очистить историю")
                         }
                     }
@@ -567,10 +801,19 @@ fun ChatScreen() {
                                 )
                             }
                         }
+                        IconButton(onClick = {
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startVoiceInput()
+                            else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }) {
+                            Icon(Icons.Filled.Mic, contentDescription = "Голосовой ввод")
+                        }
+                        IconButton(onClick = { ttsOn = !ttsOn; if (!ttsOn) tts.stop() }) {
+                            Icon(if (ttsOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, contentDescription = "Озвучка ответов")
+                        }
                         OutlinedTextField(
                             value = prompt,
                             onValueChange = { prompt = it },
-                            label = { Text("Сообщение агенту") },
+                            label = { Text(if (prompt.startsWith("/")) "Команда" else "Сообщение агенту") },
                             singleLine = false,
                             minLines = 1,
                             maxLines = 4,
@@ -601,6 +844,19 @@ fun ChatScreen() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageRow(msg: Message, onCopy: (String) -> Unit) {
+    if (msg.role == "system") {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                msg.text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
     val isUser = msg.role == "user"
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -618,7 +874,19 @@ fun MessageRow(msg: Message, onCopy: (String) -> Unit) {
                     ),
             ) {
                 if (isUser) {
-                    Text(msg.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(12.dp))
+                    if (msg.text.startsWith("/")) {
+                        val sp = msg.text.indexOf(' ')
+                        val (cmd, rest) = if (sp > 0) msg.text.substring(0, sp) to msg.text.substring(sp) else msg.text to ""
+                        val annotated = AnnotatedString.Builder().apply {
+                            pushStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold))
+                            append(cmd)
+                            pop()
+                            append(rest)
+                        }.toAnnotatedString()
+                        Text(annotated, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(12.dp))
+                    } else {
+                        Text(msg.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(12.dp))
+                    }
                 } else {
                     MarkdownView(msg.text) { onCopy(it) }
                 }
@@ -640,6 +908,7 @@ fun MarkdownView(text: String, onCopyCode: (String) -> Unit) {
     val blocks = remember(text) { parseMarkdown(text) }
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+    val ctx = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(12.dp)) {
         for (blk in blocks) {
             when (blk) {
@@ -681,9 +950,42 @@ fun MarkdownView(text: String, onCopyCode: (String) -> Unit) {
                         Modifier.padding(10.dp),
                     )
                 }
+                is ImageBlock -> ImageMessage(blk.alt, blk.url, ctx)
                 is Hr -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }
         }
+    }
+}
+
+@Composable
+fun ImageMessage(alt: String, url: String, ctx: Context) {
+    if (url.startsWith("data:image")) {
+        val bmp = remember(url) {
+            try {
+                val b64 = url.substringAfter(",")
+                val bytes = Base64.decode(b64, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            } catch (_: Exception) { null }
+        }
+        if (bmp != null) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = alt,
+                modifier = Modifier.fillMaxWidth().padding(4.dp),
+            )
+        } else {
+            Text("Изображение недоступно", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    } else {
+        val link = if (url.startsWith("http")) url else ""
+        Text(
+            alt.ifBlank { url },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clickable { if (link.isNotBlank()) openUrl(ctx, link) }
+                .padding(4.dp),
+        )
     }
 }
 
@@ -838,7 +1140,7 @@ fun SettingsPanel(
 
             OutlinedTextField(
                 value = apiKey, onValueChange = onApiKey,
-                label = { Text("API-токен / ключ") },
+                label = { Text("API-токен / ключ (шифруется)") },
                 singleLine = true,
                 enabled = sel?.needsKey != false,
                 visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
