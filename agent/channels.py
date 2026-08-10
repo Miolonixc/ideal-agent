@@ -9,11 +9,11 @@ import subprocess
 import sys
 import tempfile
 import shutil
-import textwrap
 import threading
 import time
 import urllib.parse
 import urllib.request
+import unicodedata
 from dataclasses import dataclass
 from collections import deque
 from typing import Iterator, List, Optional
@@ -30,6 +30,43 @@ class Message:
 
 TUI_MAX_ATTACHMENTS = 5
 TUI_MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
+
+def _terminal_width(text: str) -> int:
+    """Return terminal-cell width (``len`` breaks on emoji and CJK text)."""
+    total = 0
+    for char in text:
+        if unicodedata.combining(char) or char in "\ufe0e\ufe0f":
+            continue
+        total += 2 if unicodedata.east_asian_width(char) in ("F", "W") else 1
+    return total
+
+
+def _clip_terminal_text(text: str, width: int) -> str:
+    out, used = [], 0
+    for char in text:
+        size = _terminal_width(char)
+        if used + size > width:
+            break
+        out.append(char)
+        used += size
+    return "".join(out)
+
+
+def _wrap_terminal_text(text: str, width: int) -> List[str]:
+    """Wrap each logical line before it reaches curses.addstr()."""
+    width = max(1, width)
+    result = []
+    for logical_line in (text.splitlines() or [""]):
+        line = ""
+        for char in logical_line:
+            if _terminal_width(line + char) > width:
+                result.append(line.rstrip() or _clip_terminal_text(line, width))
+                line = char.lstrip()
+            else:
+                line += char
+        result.append(line)
+    return result
 
 
 def terminal_attachment(path: str):
@@ -246,9 +283,11 @@ class TUIChannel(Channel):
         def rebuild_windows():
             nonlocal h, w, hist, inp
             h, w = stdscr.getmaxyx()
-            h, w = max(8, h), max(24, w)
-            hist = curses.newwin(h - 4, w, 1, 0)
-            inp = curses.newwin(3, w, h - 3, 0)
+            # Header (1) + history + input (4) + footer (1).  Do not draw
+            # into a border row: small mobile terminals expose it immediately.
+            input_y = h - 5
+            hist = curses.newwin(max(2, input_y - 1), max(1, w), 1, 0)
+            inp = curses.newwin(4, max(1, w), max(1, input_y), 0)
             inp.keypad(True)
             hist.scrollok(True)
 
@@ -267,11 +306,9 @@ class TUIChannel(Channel):
                     prefix, color, body = "agent> ", c(1), raw[7:]
                 else:
                     prefix, color, body = "", c(5), raw
-                chunks = textwrap.wrap(body, width=max(1, width - len(prefix)),
-                                       replace_whitespace=False, drop_whitespace=False,
-                                       break_long_words=True, break_on_hyphens=False) or [""]
+                chunks = _wrap_terminal_text(body, max(1, width - _terminal_width(prefix)))
                 out.append((prefix + chunks[0], color))
-                indent = " " * len(prefix)
+                indent = " " * _terminal_width(prefix)
                 out.extend((indent + chunk, color) for chunk in chunks[1:])
             return out
 
@@ -339,9 +376,8 @@ class TUIChannel(Channel):
                 inp.addstr(0, 2, title[: max(1, w - 4)], c(5) | curses.A_BOLD)
             except curses.ошибка:
                 pass
-            for row, part in enumerate(textwrap.wrap("> " + buf, max(1, w - 2),
-                                                      replace_whitespace=False, drop_whitespace=False)[:2]):
-                try: inp.addstr(1 + row, 1, part[: w - 2], c(2))
+            for row, part in enumerate(_wrap_terminal_text("> " + buf, max(1, w - 4))[:2]):
+                try: inp.addstr(1 + row, 2, _clip_terminal_text(part, w - 4), c(2))
                 except curses.ошибка: pass
             inp.noutrefresh()
 
@@ -368,8 +404,9 @@ class TUIChannel(Channel):
             stdscr.erase()
             title = f" ⚡ {self.title} v{__version__} · {agent.provider.__class__.__name__}/{agent.provider.model} "
             try:
-                stdscr.addstr(0, 0, title, c(1) | curses.A_BOLD)
-                stdscr.addstr(0, len(title), " " * (w - len(title) - 1), c(5))
+                clipped = _clip_terminal_text(title, w - 1)
+                stdscr.addstr(0, 0, clipped, c(1) | curses.A_BOLD)
+                stdscr.addstr(0, _terminal_width(clipped), " " * max(0, w - _terminal_width(clipped) - 1), c(5))
             except curses.ошибка:
                 pass
             stdscr.noutrefresh()
@@ -383,6 +420,10 @@ class TUIChannel(Channel):
             stdscr.noutrefresh()
 
         def refresh():
+            # Soft keyboards and Termux can resize without delivering a
+            # KEY_RESIZE event to the active child window.
+            if stdscr.getmaxyx() != (h, w):
+                rebuild_windows()
             draw_header()
             hist.erase()
             hist.box()
@@ -413,7 +454,7 @@ class TUIChannel(Channel):
             for i, item in enumerate(view[start:end][:maxl]):
                 ln, color = item
                 try:
-                    hist.addstr(1 + i, 1, ln[: w - 2], color)
+                    hist.addstr(1 + i, 1, _clip_terminal_text(ln, w - 2), color)
                 except curses.ошибка:
                     pass
             hist.noutrefresh()

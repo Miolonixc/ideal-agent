@@ -89,6 +89,16 @@ class FakeCurses:
 
 
 class TestTUI(unittest.TestCase):
+    def test_terminal_wrap_preserves_message_order_and_cell_width(self):
+        sys.modules["curses"] = FakeCurses
+        from agent import channels as ch
+        importlib.reload(ch)
+        lines = ch._wrap_terminal_text("Первая строка\nemoji 👋 здесь", 16)
+        self.assertEqual(lines[0], "Первая строка")
+        self.assertIn("emoji", " ".join(lines[1:]))
+        self.assertTrue(all("\n" not in line for line in lines))
+        self.assertTrue(all(ch._terminal_width(line) <= 16 for line in lines))
+
     def test_attachment_classification(self):
         sys.modules["curses"] = FakeCurses
         from agent import channels as ch
