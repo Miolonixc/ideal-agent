@@ -513,6 +513,7 @@ fun ChatScreen() {
     var attachMenu by remember { mutableStateOf(false) }
     var sessionsMenu by remember { mutableStateOf(false) }
     var ttsOn by remember { mutableStateOf(false) }
+    var recording by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val sessions = remember {
@@ -550,7 +551,19 @@ fun ChatScreen() {
     }
 
     val speechRecognizer = remember { runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull() }
-    val tts = remember { TextToSpeech(context, null) }
+    val tts = remember {
+        var t: TextToSpeech? = null
+        t = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val ru = Locale("ru")
+                try { t?.language = ru } catch (_: Exception) { }
+                val voice = t?.voices?.firstOrNull { v -> v.locale.language == "ru" && !v.isNetworkConnectionRequired }
+                    ?: t?.voices?.firstOrNull { v -> v.locale.language == "ru" }
+                if (voice != null) try { t?.voice = voice } catch (_: Exception) { }
+            }
+        }
+        t
+    }
     fun startVoiceInput() {
         if (speechRecognizer == null || !SpeechRecognizer.isRecognitionAvailable(context)) {
             Toast.makeText(context, "Распознавание речи недоступно", Toast.LENGTH_SHORT).show()
@@ -561,7 +574,13 @@ fun ChatScreen() {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите")
         }
-        try { speechRecognizer.startListening(intent) } catch (_: Exception) { }
+        try {
+            speechRecognizer.startListening(intent)
+            recording = true
+            Toast.makeText(context, "Говорите…", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            recording = false
+        }
     }
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startVoiceInput() else Toast.makeText(context, "Нет доступа к микрофону", Toast.LENGTH_SHORT).show()
@@ -571,12 +590,13 @@ fun ChatScreen() {
         try { tts.language = Locale("ru") } catch (_: Exception) { }
         val listener = object : RecognitionListener {
             override fun onReadyForSpeech(p: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() { recording = true }
             override fun onRmsChanged(r: Float) {}
             override fun onBufferReceived(b: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onError(e: Int) { Toast.makeText(context, "ошибка распознавания", Toast.LENGTH_SHORT).show() }
+            override fun onEndOfSpeech() { recording = false }
+            override fun onError(e: Int) { recording = false; Toast.makeText(context, "ошибка распознавания", Toast.LENGTH_SHORT).show() }
             override fun onResults(r: Bundle?) {
+                recording = false
                 val res = r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 if (!res.isNullOrEmpty()) prompt = (prompt + " " + res[0]).trim()
             }
@@ -662,7 +682,7 @@ fun ChatScreen() {
         messages.add(Message("agent", ""))
         busy = true
         scope.launch {
-            askAgentStream(h, p, pv, md, key, atts) { chunk ->
+            askAgentStream(h, p, pv, md, key, atts, currentId) { chunk ->
                 val cur = messages.getOrNull(agentIdx)?.text ?: ""
                 messages[agentIdx] = Message("agent", cur + chunk)
             }
@@ -821,6 +841,28 @@ fun ChatScreen() {
                             }
                         }
                     }
+                    if (recording) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(Icons.Filled.Mic, contentDescription = null, tint = Color.Red, modifier = Modifier.size(18.dp))
+                            Text(
+                                "Идёт запись… скажите фразу, затем отправьте текст",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = {
+                                speechRecognizer?.stopListening()
+                                recording = false
+                                Toast.makeText(context, "Запись отменена", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Отменить запись", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Bottom,
@@ -844,15 +886,6 @@ fun ChatScreen() {
                                 )
                             }
                         }
-                        IconButton(onClick = {
-                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startVoiceInput()
-                            else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        }) {
-                            Icon(Icons.Filled.Mic, contentDescription = "Голосовой ввод")
-                        }
-                        IconButton(onClick = { ttsOn = !ttsOn; if (!ttsOn) tts.stop() }) {
-                            Icon(if (ttsOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, contentDescription = "Озвучка ответов")
-                        }
                         OutlinedTextField(
                             value = prompt,
                             onValueChange = { prompt = it },
@@ -866,6 +899,16 @@ fun ChatScreen() {
                             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
                             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                         )
+                        IconButton(onClick = {
+                            if (recording) { speechRecognizer?.stopListening(); recording = false }
+                            else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startVoiceInput()
+                            else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }) {
+                            Icon(Icons.Filled.Mic, contentDescription = "Голосовой ввод", tint = if (recording) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = { ttsOn = !ttsOn; if (!ttsOn) tts.stop() }) {
+                            Icon(if (ttsOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, contentDescription = "Озвучка ответов")
+                        }
                         FilledIconButton(
                             onClick = { send() },
                             enabled = !busy && (prompt.isNotBlank() || attachments.isNotEmpty()),
@@ -1234,7 +1277,7 @@ fun SettingsPanel(
     }
 }
 
-suspend fun askAgent(host: String, prompt: String, provider: String, model: String, apiKey: String, attachments: List<Attachment> = emptyList()): String {
+suspend fun askAgent(host: String, prompt: String, provider: String, model: String, apiKey: String, attachments: List<Attachment> = emptyList(), sessionId: String = "default"): String {
     return withContext(Dispatchers.IO) {
         try {
             val url = URL("http://$host/message")
@@ -1246,6 +1289,7 @@ suspend fun askAgent(host: String, prompt: String, provider: String, model: Stri
             conn.readTimeout = 120_000
             val obj = JSONObject()
             obj.put("text", prompt)
+            obj.put("session_id", sessionId)
             if (provider.isNotBlank()) obj.put("provider", provider)
             if (model.isNotBlank()) obj.put("model", model)
             if (apiKey.isNotBlank()) obj.put("api_key", apiKey)
@@ -1277,6 +1321,7 @@ suspend fun askAgent(host: String, prompt: String, provider: String, model: Stri
 suspend fun askAgentStream(
     host: String, prompt: String, provider: String, model: String, apiKey: String,
     attachments: List<Attachment> = emptyList(),
+    sessionId: String = "default",
     onChunk: (String) -> Unit,
 ): String = withContext(Dispatchers.IO) {
     val full = StringBuilder()
@@ -1290,6 +1335,7 @@ suspend fun askAgentStream(
         conn.readTimeout = 120_000
         val obj = JSONObject()
         obj.put("text", prompt)
+        obj.put("session_id", sessionId)
         if (provider.isNotBlank()) obj.put("provider", provider)
         if (model.isNotBlank()) obj.put("model", model)
         if (apiKey.isNotBlank()) obj.put("api_key", apiKey)

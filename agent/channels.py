@@ -448,6 +448,7 @@ class HTTPChannel(Channel):
                 if self.path == "/message":
                     text = (data.get("text") or "").strip()
                     attachments = HTTPChannel._prepare_attachments(data)
+                    bot._agent._session_id = data.get("session_id") or "default"
                     if not text and not attachments:
                         self._send(400, {"ok": False, "error": "empty text"})
                         return
@@ -485,6 +486,7 @@ class HTTPChannel(Channel):
                 elif self.path == "/message/stream":
                     text = (data.get("text") or "").strip()
                     attachments = HTTPChannel._prepare_attachments(data)
+                    bot._agent._session_id = data.get("session_id") or "default"
                     if not text and not attachments:
                         self._send(400, {"ok": False, "error": "empty text"})
                         return

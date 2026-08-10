@@ -45,7 +45,10 @@ class OpenAICompatible:
             raw = resp.read().decode()
         if stream:
             return self._parse_sse(raw)
-        return json.loads(raw)
+        resp = json.loads(raw)
+        if not resp.get("choices"):
+            raise RuntimeError(f"провайдер вернул пустой ответ: {raw[:300]}")
+        return resp
 
     def _parse_sse(self, raw):
         out = ""
@@ -60,7 +63,10 @@ class OpenAICompatible:
                 obj = json.loads(payload)
             except json.JSONDecodeError:
                 continue
-            delta = obj["choices"][0]["delta"].get("content")
+            choices = obj.get("choices")
+            if not choices:
+                continue
+            delta = choices[0].get("delta", {}).get("content")
             if delta:
                 out += delta
         return out
@@ -103,7 +109,10 @@ class OpenAICompatible:
                     obj = _json.loads(payload)
                 except _json.JSONDecodeError:
                     continue
-                delta = obj["choices"][0]["delta"]
+                choices = obj.get("choices")
+                if not choices:
+                    continue
+                delta = choices[0].get("delta", {})
                 if delta.get("content"):
                     yield ("content", delta["content"])
                 for tc in delta.get("tool_calls", []) or []:
@@ -325,9 +334,12 @@ class GeminiProvider:
             resp = _post(url, body, {"Content-Type": "application/json"}, timeout=self.timeout)
         except urllib.error.HTTPError as e:
             raise RuntimeError(f"Ошибка Gemini (HTTP {e.code}): {e.read().decode()[:300]}")
+        cands = resp.get("candidates") or []
+        if not cands:
+            return {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": []}}]}
         text = ""
         tool_calls = []
-        for c in resp.get("candidates", [{}])[0].get("content", {}).get("parts", []):
+        for c in cands[0].get("content", {}).get("parts", []):
             if "text" in c:
                 text += c["text"]
             if "functionCall" in c:

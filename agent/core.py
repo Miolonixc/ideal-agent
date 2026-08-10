@@ -74,7 +74,8 @@ class HistoryManager:
         if isinstance(summary, str):
             summ = summary
         else:
-            summ = summary["choices"][0]["message"]["content"]
+            choices = summary.get("choices") if isinstance(summary, dict) else None
+            summ = choices[0]["message"]["content"] if choices else ""
         self.messages = [
             {"role": "system", "content": f"[summary of earlier context]\n{summ}"}
         ] + keep
@@ -84,7 +85,8 @@ class Agent:
     def __init__(self, cfg, registry=None):
         self.cfg = cfg
         self.provider = llm_mod.get_provider(cfg.llm)
-        self.history = HistoryManager(self.provider, budget=getattr(cfg, "context_budget", 6000))
+        self._sessions: Dict[str, HistoryManager] = {}
+        self._session_id = "default"
         self.registry = registry or ToolRegistry()
         self.gate = safety.ApprovalGate(cfg.mode, cfg.allow, cfg.deny)
         self.audit = safety.AuditLog()
@@ -102,6 +104,14 @@ class Agent:
             lambda a: a.get("text", ""),
         )
         self._mcp_clients = []
+
+    @property
+    def history(self):
+        h = self._sessions.get(self._session_id)
+        if h is None:
+            h = HistoryManager(self.provider, budget=getattr(self.cfg, "context_budget", 6000))
+            self._sessions[self._session_id] = h
+        return h
 
     def load_skills_dir(self, skills_dir):
         from .skills import load_skills
