@@ -9,7 +9,9 @@ class TestSandbox(unittest.TestCase):
     def test_sandbox_command_prefers_bwrap(self):
         with mock.patch("agent.safety._has_bwrap", return_value=True), \
              mock.patch("agent.safety._has_unshare", return_value=True):
-            self.assertIn("bwrap", safety._sandbox_command("ls"))
+            command = safety._sandbox_command("ls")
+        self.assertIn("bwrap", command)
+        self.assertNotIn("--ro-bind / /", command)
 
     def test_sandbox_command_falls_to_unshare(self):
         with mock.patch("agent.safety._has_bwrap", return_value=False), \

@@ -94,11 +94,19 @@ def run_sandboxed(command: str, timeout: int = 30, cwd: Optional[str] = None,
 def _sandbox_command(command: str, cwd: Optional[str] = None) -> str:
     if _has_bwrap():
         work = os.path.realpath(cwd) if cwd else "/tmp"
-        return (
-            "bwrap --ro-bind / / --bind " + work + " " + work +
-            " --chdir " + work + " --dev /dev --tmpfs /tmp --unshare-net --die-with-parent -- /bin/sh -c " +
-            shlex.quote(command)
-        )
+        # Не bind'им `/` целиком: это оставило бы доступным чтение всех файлов
+        # хоста. Нужны только runtime-директории для shell и библиотек.
+        args = ["bwrap", "--unshare-net", "--die-with-parent", "--new-session"]
+        for directory in ("/usr", "/bin", "/lib", "/lib64"):
+            # На современных Debian/Ubuntu /bin и /lib обычно symlink в /usr;
+            # /usr уже смонтирован, повторный bind в ту же точку не нужен.
+            if os.path.exists(directory) and not os.path.islink(directory):
+                args.extend(["--ro-bind", directory, directory])
+        args.extend(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+                     "--bind", work, work, "--chdir", work, "--"])
+        shell = "/usr/bin/sh" if os.path.exists("/usr/bin/sh") else "/bin/sh"
+        args.extend([shell, "-c", command])
+        return shlex.join(args)
     if _has_unshare():
         return "unshare -r --net -- /bin/sh -c " + shlex.quote(command)
     return command

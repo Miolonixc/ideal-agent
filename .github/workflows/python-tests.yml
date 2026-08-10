@@ -16,3 +16,15 @@ jobs:
           python-version: "3.11"
       - name: Run tests
         run: timeout 120 python3 -m unittest discover -s tests
+
+  sandbox-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install --yes bubblewrap
+      - name: Verify filesystem and network sandboxing
+        run: python3 -m unittest tests.test_sandbox_integration -v
