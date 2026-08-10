@@ -124,7 +124,20 @@ bash install.sh                       # установка в ~/.local/share/ide
 IDEAL_LLM_API_KEY=sk-... bash install.sh --service   # + автозапуск
 ```
 Поддерживаются Termux (Termux:Boot), Linux (systemd --user) и macOS (LaunchAgent).
-По умолчанию копируются `fs_mcp.py` и `fetch_mcp.py`. Android-компаньон —
+Установщик не перезаписывает существующий конфиг, создаёт защищённый HTTP-токен
+и выводит его один раз для Android-компаньона. Для чистого Termux:
+
+```bash
+pkg update -y
+pkg install -y git
+git clone https://github.com/Miolonixc/ideal-agent.git
+cd ideal-agent
+IDEAL_LLM_API_KEY=sk-... bash install.sh --service
+```
+
+После установки укажи в приложении `127.0.0.1:8080` и напечатанный токен.
+Для автозапуска поставь приложение Termux:Boot и один раз открой его.
+Android-компаньон —
 см. `docs/android-companion.md` и готовый проект `android/idealagent/`
 (Jetpack Compose, собирается в Android Studio).
 

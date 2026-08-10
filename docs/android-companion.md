@@ -51,6 +51,13 @@ fun askAgent(prompt: String): String {
 pkg install python
 IDEAL_HTTP_HOST=127.0.0.1 IDEAL_HTTP_PORT=8080 python3 main.py http
 ```
+Или с установкой и автозапуском через Termux:Boot:
+
+```bash
+IDEAL_LLM_API_KEY=sk-... bash install.sh --service
+```
+
+Установщик выводит токен HTTP — сохрани его и укажи в настройках приложения.
 Чтобы приложение видело `127.0.0.1:8080`, агент должен быть запущен в том же
 Termux-окружении (Termux предоставляет общий localhost).
 

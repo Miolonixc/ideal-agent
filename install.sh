@@ -1,366 +1,253 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# ideal-agent installer — works from a checkout or via `curl ... | bash`.
+set -Eeuo pipefail
 
-info(){ echo "== $*"; }
-err(){ echo "ошибка: $*" >&2; }
-has(){ command -v "$1" >/dev/null 2>&1; }
-interactive(){ [ -c /dev/tty ] && exec 3< /dev/tty 2>/dev/null && exec 3>&-; }
-prompt(){
-    local q="$1" dflt="$2" v=""
-    if interactive; then printf '%s [%s] ' "$q" "$dflt" >/dev/tty; read -r v </dev/tty 2>/dev/null || v=""; fi
-    echo "${v:-$dflt}"
-}
-yesno(){
-    case "$(prompt "$1" "$2")" in y|Y|yes|YES|д|Д|да|Да|1) return 0;; *) return 1;; esac
-}
-lan_ip(){
-    ip -4 addr show 2>/dev/null | awk '/inet / && $2 !~ /^127\./ {sub(/\/.*/,"",$2); print $2; exit}'
-    hostname -I 2>/dev/null | awk '{print $1}'
-    return 0
-}
-APK_URL="${IDEAL_APK_URL:-https://github.com/Miolonixc/ideal-agent/releases/download/v0.2.6/ideal-agent-debug.apk}"
-offer_apk(){
-    [ "${DOWNLOAD_APK:-0}" = "1" ] || { [ "$PLATFORM" = "termux" ] && interactive; } || return 0
-    [ "${DOWNLOAD_APK:-0}" = "1" ] || yesno "Скачать APK компаньона в Загрузки?" "n" || return 0
-    local DL="$HOME/storage/downloads"
-    [ -d "$DL" ] || DL="/sdcard/Download"
-    [ -d "$DL" ] || DL="$HOME/Download"
-    mkdir -p "$DL" 2>/dev/null || true
-    info "скачиваю APK в $DL ..."
-    if has curl; then
-        curl -fL -o "$DL/ideal-agent-debug.apk" "$APK_URL" && info "APK: $DL/ideal-agent-debug.apk" || err "не удалось скачать APK"
-    elif has wget; then
-        wget -O "$DL/ideal-agent-debug.apk" "$APK_URL" && info "APK: $DL/ideal-agent-debug.apk" || err "не удалось скачать APK"
-    else
-        err "нет curl/wget — скачай вручную: $APK_URL"
+REPO_URL_DEFAULT="https://github.com/Miolonixc/ideal-agent.git"
+CHANNEL=""
+DEST=""
+INSTALL_SERVICE=0
+RUN_TESTS=1
+CLONE_DIR=""
+
+say() { printf '\n== %s\n' "$*"; }
+note() { printf '   %s\n' "$*"; }
+fail() { printf 'ошибка: %s\n' "$*" >&2; exit 1; }
+has() { command -v "$1" >/dev/null 2>&1; }
+
+cleanup() {
+    if [ -n "$CLONE_DIR" ]; then
+        rm -rf "$CLONE_DIR"
     fi
 }
+trap cleanup EXIT
 
-SRC="$(cd "$(dirname "$0")" && pwd)"
-DEST="${1:-}"
+usage() {
+    cat <<'EOF'
+Использование: bash install.sh [опции]
 
-# если скрипт запущен не из репозитория (например, curl | bash), подтянем исходники
-if [ ! -d "$SRC/agent" ]; then
-    info "исходники не найдены рядом — клонирую репозиторий..."
-    REPO_URL="${IDEAL_REPO:-https://github.com/Miolonixc/ideal-agent.git}"
-    CLONE_DIR="$(mktemp -d)"
-    if ! git clone --depth 1 "$REPO_URL" "$CLONE_DIR" 2>/dev/null; then
-        err "не удалось клонировать $REPO_URL (нужен git + сеть)"
-        exit 1
-    fi
-    SRC="$CLONE_DIR"
-fi
+  --dest PATH          Папка установки
+  --service             Создать и запустить HTTP-сервис для компаньона
+  --channel http|telegram
+                         Канал для сервиса (по умолчанию: http)
+  --no-tests            Не запускать тесты после установки
+  -h, --help            Показать эту справку
 
-# --- платформа ---
-if [ -d "/data/data/com.termux" ] || [ -n "${TERMUX_VERSION:-}" ]; then
+Переменные окружения:
+  IDEAL_LLM_API_KEY, IDEAL_PROVIDER, IDEAL_BASE_URL, IDEAL_MODEL
+  IDEAL_HTTP_TOKEN, IDEAL_HTTP_PORT, IDEAL_REPO
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dest) [ "$#" -ge 2 ] || fail "для --dest нужен путь"; DEST="$2"; shift 2 ;;
+        --service) INSTALL_SERVICE=1; shift ;;
+        --channel) [ "$#" -ge 2 ] || fail "для --channel нужен канал"; CHANNEL="$2"; shift 2 ;;
+        --no-tests) RUN_TESTS=0; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) fail "неизвестная опция: $1" ;;
+    esac
+done
+
+if [ -d /data/data/com.termux ] || [ -n "${TERMUX_VERSION:-}" ]; then
     PLATFORM="termux"
-elif [ "$(uname)" = "Darwin" ]; then
+elif [ "$(uname -s)" = "Darwin" ]; then
     PLATFORM="macos"
 else
     PLATFORM="linux"
 fi
 
-if [ -z "$DEST" ]; then
+install_package() {
+    local package="$1"
     case "$PLATFORM" in
-        termux) DEST="$HOME/.local/share/ideal-agent" ;;
-        macos)  DEST="$HOME/Library/Application Support/ideal-agent" ;;
-        *)      DEST="$HOME/.local/share/ideal-agent" ;;
+        termux) pkg install -y "$package" ;;
+        macos) has brew || fail "нужен Homebrew для установки $package"; brew install "$package" ;;
+        linux)
+            if has apt-get; then sudo apt-get update && sudo apt-get install -y "$package"
+            elif has dnf; then sudo dnf install -y "$package"
+            elif has pacman; then sudo pacman -Sy --noconfirm "$package"
+            else fail "не знаю, как установить $package; установи его вручную"
+            fi ;;
     esac
-fi
+}
 
-echo "== ideal-agent installer =="
-echo "platform: $PLATFORM"
-echo "SRC : $SRC"
-echo "DEST: $DEST"
+ensure_python() {
+    if ! has python3; then
+        say "Устанавливаю Python"
+        install_package "python"
+    fi
+    PYBIN="$(command -v python3)"
+    "$PYBIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+        || fail "нужен Python 3.10+, найден: $($PYBIN -V 2>&1)"
+}
 
-# --- зависимости ---
-info "проверка зависимостей"
-if ! has git; then
-    info "git не найден — ставлю..."
-    case "$PLATFORM" in
-        termux) pkg install -y git >/dev/null 2>&1 || { err "pkg install git не удался"; exit 1; } ;;
-        macos)  brew install git >/dev/null 2>&1 || { err "brew install git не удался"; exit 1; } ;;
-        *)      sudo apt-get update >/dev/null 2>&1; sudo apt-get install -y git >/dev/null 2>&1 || { err "apt-get install git не удался"; exit 1; } ;;
-    esac
-fi
-if ! has python3; then
-    info "python3 не найден — ставлю..."
-    case "$PLATFORM" in
-        termux) pkg install -y python >/dev/null 2>&1 || { err "pkg install python не удался"; exit 1; } ;;
-        macos)  brew install python >/dev/null 2>&1 || { err "brew install python не удался"; exit 1; } ;;
-        *)      sudo apt-get install -y python3 >/dev/null 2>&1 || { err "apt-get install python3 не удался"; exit 1; } ;;
-    esac
-fi
-PYBIN="$(command -v python3)"
-if [ "$("$PYBIN" -c 'import sys;print(sys.version_info>=(3,10))')" != "True" ]; then
-    err "нужен python >= 3.10 (сейчас $("$PYBIN" -V 2>&1))"; exit 1
-fi
-info "python: $PYBIN ($("$PYBIN" -c 'import sys;print("%d.%d"%sys.version_info[:2])'))"
-info "зависимостей pip нет: агент использует только стандартную библиотеку Python"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+SRC="$SCRIPT_DIR"
 
-# --- копирование ---
-if [ "$SRC" != "$DEST" ]; then
-    mkdir -p "$DEST"
-    for item in agent skills mcp_servers tests config.example.json README.md pyproject.toml docs install.sh; do
-        [ -e "$SRC/$item" ] && cp -r "$SRC/$item" "$DEST/"
-    done
-    info "файлы скопированы в $DEST"
-else
-    info "SRC == DEST, копирование пропущено"
-fi
-chmod +x "$DEST"/skills/*/run.sh 2>/dev/null || true
-chmod +x "$DEST"/mcp_servers/*.py 2>/dev/null || true
+ensure_source() {
+    if [ -f "$SRC/main.py" ] && [ -d "$SRC/agent" ]; then return; fi
+    has git || { say "Устанавливаю Git"; install_package git; }
+    CLONE_DIR="$(mktemp -d)"
+    say "Скачиваю исходники"
+    git clone --depth 1 "${IDEAL_REPO:-$REPO_URL_DEFAULT}" "$CLONE_DIR"
+    SRC="$CLONE_DIR"
+}
 
+ensure_python
+ensure_source
+
+case "$PLATFORM" in
+    termux) DEFAULT_DEST="$HOME/.local/share/ideal-agent" ;;
+    macos) DEFAULT_DEST="$HOME/Library/Application Support/ideal-agent" ;;
+    *) DEFAULT_DEST="$HOME/.local/share/ideal-agent" ;;
+esac
+DEST="${DEST:-$DEFAULT_DEST}"
+DEST="$("$PYBIN" -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$DEST")"
 CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ideal-agent"
-mkdir -p "$CFG_DIR"
-if [ ! -f "$CFG_DIR/config.json" ]; then
-    KEY="${IDEAL_LLM_API_KEY:-}"
-    PROV="${IDEAL_PROVIDER:-openai-compatible}"
-    BASE="${IDEAL_BASE_URL:-https://api.tokenrouter.com/v1}"
-    MODEL="${IDEAL_MODEL:-moonshotai/kimi-k3-free}"
-    if [ -z "$KEY" ] && interactive; then
-        KEY="$(prompt 'Введите LLM API-ключ (IDEAL_LLM_API_KEY, можно оставить пустым)' "")"
-    fi
-    cat > "$CFG_DIR/config.json" <<JSON
-{
-  "llm": {
-    "provider": "$PROV",
-    "base_url": "$BASE",
-    "model": "$MODEL",
-    "api_key": "$KEY"
-  },
-  "mode": "auto",
-  "deny": ["shell:rm -rf"],
-  "workspace": "$HOME/dev",
-  "skills_dir": "$DEST/skills",
-  "mcp_servers": [
-    "python3 $DEST/mcp_servers/fs_mcp.py",
-    "python3 $DEST/mcp_servers/fetch_mcp.py"
-  ],
-  "use_context": true,
-  "telegram": { "token": "${TELEGRAM_BOT_TOKEN:-}", "allowed": [] }
+CFG="$CFG_DIR/config.json"
+
+say "ideal-agent"
+note "Платформа: $PLATFORM"
+note "Установка: $DEST"
+note "Python: $($PYBIN -V 2>&1)"
+
+say "Копирую файлы"
+mkdir -p "$DEST"
+for item in main.py agent skills mcp_servers docs tests config.example.json README.md pyproject.toml install.sh; do
+    [ -e "$SRC/$item" ] && cp -R "$SRC/$item" "$DEST/"
+done
+chmod +x "$DEST/install.sh" "$DEST"/skills/*/run.sh 2>/dev/null || true
+
+say "Настраиваю конфиг"
+mkdir -p "$CFG_DIR" "$HOME/dev"
+if [ ! -f "$CFG" ]; then
+    HTTP_TOKEN="${IDEAL_HTTP_TOKEN:-$($PYBIN -c 'import secrets; print(secrets.token_urlsafe(32))')}"
+    CFG_PATH="$CFG" DEST_PATH="$DEST" HOME_PATH="$HOME" HTTP_TOKEN="$HTTP_TOKEN" \
+    LLM_KEY="${IDEAL_LLM_API_KEY:-}" LLM_PROVIDER="${IDEAL_PROVIDER:-openai-compatible}" \
+    LLM_BASE_URL="${IDEAL_BASE_URL:-https://api.tokenrouter.com/v1}" \
+    LLM_MODEL="${IDEAL_MODEL:-moonshotai/kimi-k3-free}" "$PYBIN" - <<'PY'
+import json
+import os
+
+config = {
+    "llm": {
+        "provider": os.environ["LLM_PROVIDER"],
+        "base_url": os.environ["LLM_BASE_URL"],
+        "model": os.environ["LLM_MODEL"],
+        "api_key": os.environ["LLM_KEY"],
+    },
+    "mode": "auto",
+    "deny": ["shell:rm -rf"],
+    "workspace": os.path.join(os.environ["HOME_PATH"], "dev"),
+    "sandbox_mode": "required",
+    "skills_dir": os.path.join(os.environ["DEST_PATH"], "skills"),
+    "mcp_servers": [
+        f"python3 {os.path.join(os.environ['DEST_PATH'], 'mcp_servers', 'fs_mcp.py')}",
+        f"python3 {os.path.join(os.environ['DEST_PATH'], 'mcp_servers', 'fetch_mcp.py')}",
+    ],
+    "use_context": True,
+    "http": {"host": "127.0.0.1", "token": os.environ["HTTP_TOKEN"], "github_webhook_secret": ""},
+    "telegram": {"token": "", "allowed": []},
 }
-JSON
-    info "создан конфиг: $CFG_DIR/config.json"
-    [ -z "$KEY" ] && info "ВНИМАНИЕ: ключ LLM не задан — задай IDEAL_LLM_API_KEY или впиши api_key в config.json"
+with open(os.environ["CFG_PATH"], "w", encoding="utf-8") as f:
+    json.dump(config, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
+    chmod 600 "$CFG"
+    note "Создан конфиг: $CFG"
+    note "HTTP-токен: $HTTP_TOKEN"
+    note "Сохрани токен: он нужен Android-компаньону."
 else
-    info "конфиг уже есть: $CFG_DIR/config.json (не перезаписан)"
+    note "Сохраняю существующий конфиг: $CFG"
 fi
 
+if [ "$RUN_TESTS" = 1 ]; then
+    say "Проверяю установку"
+    (cd "$DEST" && "$PYBIN" -m py_compile main.py agent/*.py)
+    (cd "$DEST" && "$PYBIN" -m unittest discover -s tests) \
+        || note "Тесты не скопированы; запусти: cd $DEST && python3 -m unittest discover -s tests"
+fi
+
+write_termux_service() {
+    local launcher="$HOME/.termux/boot/ideal-agent-http.sh"
+    mkdir -p "$(dirname "$launcher")" "$HOME/.local/state/ideal-agent" "$HOME/.local/state/ideal-agent/logs"
+    cat > "$launcher" <<EOF
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+PID_FILE="\$HOME/.local/state/ideal-agent/http.pid"
+LOG_FILE="\$HOME/.local/state/ideal-agent/logs/http.log"
+if [ -f "\$PID_FILE" ] && kill -0 "\$(cat "\$PID_FILE")" 2>/dev/null; then exit 0; fi
+termux-wake-lock >/dev/null 2>&1 || true
 cd "$DEST"
-if [ -d tests ]; then
-    if "$PYBIN" -m unittest discover -s tests >/dev/null 2>&1; then
-        info "тесты: OK"
-    else
-        info "тесты: есть сбои (см. python3 -m unittest discover -s tests)"
-    fi
-fi
-
-port_free(){
-    "$PYBIN" -c "import socket,sys
-s=socket.socket(); s.settimeout(0.3)
-try:
-    s.bind(('0.0.0.0',int(sys.argv[1]))); s.close(); sys.exit(0)
-except OSError:
-    sys.exit(1)" "$1"
+nohup "$PYBIN" -u main.py http --port "${IDEAL_HTTP_PORT:-8080}" >> "\$LOG_FILE" 2>&1 < /dev/null &
+echo \$! > "\$PID_FILE"
+EOF
+    chmod 700 "$launcher"
+    "$launcher"
+    note "Termux:Boot launcher: $launcher"
+    note "Лог: $HOME/.local/state/ideal-agent/logs/http.log"
 }
 
-# --- сервис ---
-SERVICE_ARG="${2:-${SERVICE:-}}"
-CHANNEL="${IDEAL_CHANNEL:-}"
-if [ -z "$CHANNEL" ] && { [ "$SERVICE_ARG" = "--service" ] || [ "$SERVICE_ARG" = "1" ] || [ -n "${SERVICE:-}" ]; }; then
-    if interactive && yesno "Создать сервис (автозапуск)? [telegram/http(companion)]" "http"; then
-        CHANNEL="$(prompt 'Канал: telegram или http (для Android-компаньона)?' "http")"
-    else
-        CHANNEL="${CHANNEL:-telegram}"
-    fi
-fi
-
-if [ -n "$CHANNEL" ]; then
-    case "$CHANNEL" in
-        http)
-            PORT="${IDEAL_HTTP_PORT:-8080}"
-            while ! port_free "$PORT"; do
-                info "порт $PORT занят"
-                if interactive; then
-                    PORT="$(prompt 'Укажи другой свободный порт' "8090")"
-                else
-                    err "порт $PORT занят — задай IDEAL_HTTP_PORT"; exit 1
-                fi
-            done
-            # убедимся, что ключ LLM есть
-            if ! "$PYBIN" -c "import json,os,sys; c=json.load(open(os.path.expanduser('$CFG_DIR/config.json'))); sys.exit(0 if c.get('llm',{}).get('api_key') else 1)"; then
-                if interactive; then
-                    NK="$(prompt 'LLM API-ключ отсутствует — введите' "")"
-                    [ -n "$NK" ] && "$PYBIN" -c "import json,os
-p=os.path.expanduser('$CFG_DIR/config.json'); c=json.load(open(p)); c.setdefault('llm',{})['api_key']='$NK'; json.dump(c,open(p,'w'),ensure_ascii=False,indent=2)"
-                fi
-            fi
-            case "$PLATFORM" in
-                termux)
-                    BOOT="$HOME/.termux/boot"; mkdir -p "$BOOT"
-                    cat > "$BOOT/ideal-agent.sh" <<SH
-#!/bin/sh
-termux-wake-lock
-cd "$DEST"
-export IDEAL_LLM_API_KEY="${IDEAL_LLM_API_KEY:-}"
-export IDEAL_HTTP_HOST=0.0.0.0
-export IDEAL_HTTP_PORT=$PORT
-nohup sh -c 'while true; do
-  if ! pgrep -f "python3 -u main.py" >/dev/null 2>&1; then
-    nohup python3 -u main.py http > "\$HOME/logs/ideal-agent-http.log" 2>&1 &
-  fi
-  sleep 30
-done' >/dev/null 2>&1 &
-SH
-                    chmod +x "$BOOT/ideal-agent.sh"
-                    info "Termux-boot скрипт: $BOOT/ideal-agent.sh (нужен Termux:Boot)"
-                    ;;
-                macos)
-                    LAUNCH="$HOME/Library/LaunchAgents/com.idealagent.plist"
-                    TOK="${TELEGRAM_BOT_TOKEN:-}"
-                    cat > "$LAUNCH" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.idealagent</string>
-  <key>ProgramArguments</key>
-  <array><string>$PYBIN</string><string>$DEST/main.py</string><string>http</string></array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>TELEGRAM_BOT_TOKEN</key><string>$TOK</string>
-    <key>IDEAL_LLM_API_KEY</key><string>${IDEAL_LLM_API_KEY:-}</string>
-    <key>IDEAL_HTTP_HOST</key><string>0.0.0.0</string>
-    <key>IDEAL_HTTP_PORT</key><string>$PORT</string>
-  </dict>
-  <key>WorkingDirectory</key><string>$DEST</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-</dict></plist>
-PLIST
-                    info "LaunchAgent: $LAUNCH (launchctl load $LAUNCH)"
-                    ;;
-                *)
-                    UNIT_DIR="$HOME/.config/systemd/user"; mkdir -p "$UNIT_DIR"
-                    cat > "$UNIT_DIR/ideal-agent.service" <<UNIT
+write_linux_service() {
+    local unit_dir="$HOME/.config/systemd/user"
+    mkdir -p "$unit_dir"
+    cat > "$unit_dir/ideal-agent.service" <<EOF
 [Unit]
-Description=ideal-agent (HTTP companion channel)
+Description=ideal-agent HTTP companion
 After=network-online.target
-Wants=network-online.target
 
 [Service]
-Environment=TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-Environment=IDEAL_LLM_API_KEY=${IDEAL_LLM_API_KEY:-}
-Environment=IDEAL_HTTP_HOST=0.0.0.0
-Environment=IDEAL_HTTP_PORT=$PORT
 WorkingDirectory=$DEST
-ExecStart=$PYBIN $DEST/main.py http
+ExecStart=$PYBIN $DEST/main.py http --port ${IDEAL_HTTP_PORT:-8080}
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=default.target
-UNIT
-                    info "юнит: $UNIT_DIR/ideal-agent.service (systemctl --user enable --now ideal-agent)"
-                    ;;
-            esac
-            # запускаем прямо сейчас для проверки
-            mkdir -p "$HOME/logs"
-            setsid env IDEAL_HTTP_HOST=0.0.0.0 IDEAL_HTTP_PORT="$PORT" "$PYBIN" -u "$DEST/main.py" http > "$HOME/logs/ideal-agent-http.log" 2>&1 < /dev/null &
-            sleep 2
-            IP="$(lan_ip)"
-            info "HTTP-канал запущен на 0.0.0.0:$PORT"
-            info "в Android-приложении укажи: http://${IP:-<LAN-IP-этого-телефона>}:$PORT"
-            ;;
-        telegram)
-            TOK="${TELEGRAM_BOT_TOKEN:-}"
-            if [ -z "$TOK" ] && interactive; then
-                TOK="$(prompt 'Telegram-токен бота' "")"
-            fi
-            if [ -n "$TOK" ]; then
-                "$PYBIN" -c "import json,os
-p=os.path.expanduser('$CFG_DIR/config.json'); c=json.load(open(p)); c.setdefault('telegram',{})['token']='$TOK'; json.dump(c,open(p,'w'),ensure_ascii=False,indent=2)"
-            fi
-            case "$PLATFORM" in
-                termux)
-                    BOOT="$HOME/.termux/boot"; mkdir -p "$BOOT"
-                    cat > "$BOOT/ideal-agent.sh" <<SH
-#!/bin/sh
-termux-wake-lock
-cd "$DEST"
-export TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
-export IDEAL_LLM_API_KEY="${IDEAL_LLM_API_KEY:-}"
-nohup sh -c 'while true; do
-  if ! pgrep -f "python3 -u main.py" >/dev/null 2>&1; then
-    nohup python3 -u main.py > "\$HOME/logs/ideal-agent-telegram.log" 2>&1 &
-  fi
-  sleep 30
-done' >/dev/null 2>&1 &
-SH
-                    chmod +x "$BOOT/ideal-agent.sh"
-                    info "Termux-boot скрипт: $BOOT/ideal-agent.sh (нужен Termux:Boot)"
-                    ;;
-                macos)
-                    LAUNCH="$HOME/Library/LaunchAgents/com.idealagent.plist"
-                    cat > "$LAUNCH" <<PLIST
+EOF
+    systemctl --user daemon-reload
+    systemctl --user enable --now ideal-agent.service
+    note "systemd service запущен: ideal-agent.service"
+}
+
+write_macos_service() {
+    local plist="$HOME/Library/LaunchAgents/com.idealagent.plist"
+    mkdir -p "$(dirname "$plist")" "$HOME/Library/Logs/ideal-agent"
+    cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.idealagent</string>
-  <key>ProgramArguments</key>
-  <array><string>$PYBIN</string><string>$DEST/main.py</string></array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>TELEGRAM_BOT_TOKEN</key><string>$TOK</string>
-    <key>IDEAL_LLM_API_KEY</key><string>${IDEAL_LLM_API_KEY:-}</string>
-  </dict>
+  <key>ProgramArguments</key><array><string>$PYBIN</string><string>$DEST/main.py</string><string>http</string><string>--port</string><string>${IDEAL_HTTP_PORT:-8080}</string></array>
   <key>WorkingDirectory</key><string>$DEST</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$HOME/Library/Logs/ideal-agent/http.log</string>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/ideal-agent/http.log</string>
 </dict></plist>
-PLIST
-                    info "LaunchAgent: $LAUNCH (launchctl load $LAUNCH)"
-                    ;;
-                *)
-                    UNIT_DIR="$HOME/.config/systemd/user"; mkdir -p "$UNIT_DIR"
-                    cat > "$UNIT_DIR/ideal-agent.service" <<UNIT
-[Unit]
-Description=ideal-agent (Telegram channel)
-After=network-online.target
-Wants=network-online.target
+EOF
+    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || true
+    note "LaunchAgent: $plist"
+}
 
-[Service]
-Environment=TELEGRAM_BOT_TOKEN=$TOK
-Environment=IDEAL_LLM_API_KEY=${IDEAL_LLM_API_KEY:-}
-WorkingDirectory=$DEST
-ExecStart=$PYBIN $DEST/main.py
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-UNIT
-                    info "юнит: $UNIT_DIR/ideal-agent.service (systemctl --user enable --now ideal-agent)"
-                    ;;
-            esac
-            ;;
-        *) err "неизвестный канал: $CHANNEL"; exit 1 ;;
+if [ "$INSTALL_SERVICE" = 1 ]; then
+    CHANNEL="${CHANNEL:-http}"
+    [ "$CHANNEL" = http ] || fail "пока service installer поддерживает только --channel http"
+    say "Создаю HTTP-сервис"
+    case "$PLATFORM" in
+        termux) write_termux_service ;;
+        macos) write_macos_service ;;
+        *) write_linux_service ;;
     esac
 fi
 
 cat <<EOF
 
-Готово. Запуск:
-  python3 $DEST/main.py "твоя задача"            # CLI (одноразово)
-  python3 $DEST/main.py cli "твоя задача"        # CLI явно
-  python3 $DEST/main.py tui                      # TUI (ncurses)
-  python3 $DEST/main.py telegram                 # Telegram long-poll
-  python3 $DEST/main.py http --port 8080         # HTTP (компаньон/вебхуки)
-  python3 $DEST/main.py ide                       # IDE (TCP 127.0.0.1:8765)
+Готово.
 
-Ключи окружения: IDEAL_LLM_API_KEY, TELEGRAM_BOT_TOKEN, GITHUB_TOKEN, IDEAL_PROVIDER,
-IDEAL_CHANNEL, IDEAL_HTTP_PORT, IDEAL_HTTP_HOST.
-Android-компаньон (APK): https://github.com/Miolonixc/ideal-agent/releases
+Запуск вручную:
+  cd $DEST
+  $PYBIN main.py "объясни структуру проекта"
+  $PYBIN main.py http --port 8080
+
+Android-компаньон: host 127.0.0.1:8080, токен — поле http.token в $CFG
 EOF
-
-offer_apk
