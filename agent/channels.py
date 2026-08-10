@@ -10,10 +10,12 @@ import sys
 import tempfile
 import shutil
 import textwrap
+import threading
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from collections import deque
 from typing import Iterator, List, Optional
 
 import curses
@@ -632,6 +634,7 @@ class HTTPChannel(Channel):
     MAX_BODY_BYTES = 12 * 1024 * 1024
     MAX_ATTACHMENTS = 5
     MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+    MAX_TEXT_CHARS = 64 * 1024
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8080,
                  token: str = "", github_webhook_secret: str = ""):
@@ -640,6 +643,21 @@ class HTTPChannel(Channel):
         self.token = token
         self.github_webhook_secret = github_webhook_secret
         self._agent = None
+        self.rate_limit = 60
+        self.rate_window_seconds = 60
+        self._rate_lock = threading.Lock()
+        self._rate_events = {}
+
+    def _allow_request(self, key: str) -> bool:
+        now = time.monotonic()
+        with self._rate_lock:
+            events = self._rate_events.setdefault(key, deque())
+            while events and events[0] <= now - self.rate_window_seconds:
+                events.popleft()
+            if len(events) >= self.rate_limit:
+                return False
+            events.append(now)
+            return True
 
     def read(self) -> Optional[Message]:
         raise NotImplementedError("HTTPChannel использует run(agent)")
@@ -730,6 +748,14 @@ class HTTPChannel(Channel):
             def _forbidden(self):
                 self._send(401, {"ok": False, "error": "unauthorized"})
 
+            def _rate_limited(self):
+                self._send(429, {"ok": False, "error": "rate limit exceeded"})
+
+            def _rate_key(self):
+                if bot.token:
+                    return "token:" + self.headers.get("X-Ideal-Agent-Token", "")
+                return "ip:" + self.client_address[0]
+
             def _valid_github_signature(self, raw):
                 if not bot.github_webhook_secret:
                     return False
@@ -769,8 +795,14 @@ class HTTPChannel(Channel):
                 if not self._authorized():
                     self._forbidden()
                     return
+                if not bot._allow_request(self._rate_key()):
+                    self._rate_limited()
+                    return
                 if self.path == "/message":
                     text = (data.get("text") or "").strip()
+                    if len(text) > HTTPChannel.MAX_TEXT_CHARS:
+                        self._send(413, {"ok": False, "error": "text too large"})
+                        return
                     attachments, attachment_dir = HTTPChannel._prepare_attachments(data)
                     session_id = data.get("session_id") or "default"
                     if not text and not attachments:
@@ -809,6 +841,9 @@ class HTTPChannel(Channel):
                     self._send(200, {"ok": True})
                 elif self.path == "/message/stream":
                     text = (data.get("text") or "").strip()
+                    if len(text) > HTTPChannel.MAX_TEXT_CHARS:
+                        self._send(413, {"ok": False, "error": "text too large"})
+                        return
                     attachments, attachment_dir = HTTPChannel._prepare_attachments(data)
                     session_id = data.get("session_id") or "default"
                     if not text and not attachments:

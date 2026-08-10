@@ -100,6 +100,14 @@ class TestGitHubWebhook(unittest.TestCase):
 
 
 class TestHTTPChannel(unittest.TestCase):
+    def test_rate_limiter(self):
+        ch = HTTPChannel(token="token")
+        ch.rate_limit = 2
+        self.assertTrue(ch._allow_request("token:token"))
+        self.assertTrue(ch._allow_request("token:token"))
+        self.assertFalse(ch._allow_request("token:token"))
+        self.assertTrue(ch._allow_request("token:another"))
+
     def test_live(self):
         import time
         import socket
