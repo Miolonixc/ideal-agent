@@ -8,6 +8,8 @@ from . import safety
 
 
 ALLOWED_NOTE = "операция вне workspace запрещена"
+MAX_READ_BYTES = 256 * 1024
+MAX_GREP_FILE_BYTES = 1024 * 1024
 
 
 def _roots(cfg):
@@ -33,12 +35,14 @@ def register_builtin_tools(registry, cfg):
             return "ошибка: " + ALLOWED_NOTE
         try:
             with open(p, encoding="utf-8") as f:
-                data = f.read()
+                data = f.read(MAX_READ_BYTES + 1)
         except Exception as e:
             return f"ошибка: {e}"
         limit = int(args.get("limit", 0) or 0)
         if limit > 0:
-            data = "\n".join(data.splitlines()[:limit])
+            data = "\n".join(data.splitlines()[:min(limit, 10_000)])
+        if len(data) > MAX_READ_BYTES:
+            return data[:MAX_READ_BYTES] + "\n[файл обрезан]"
         return data
 
     def write_file(args):
@@ -76,7 +80,7 @@ def register_builtin_tools(registry, cfg):
         out = []
         for r in roots:
             for m in gmod.glob(os.path.join(r, pat), recursive=True):
-                if os.path.isfile(m):
+                if os.path.isfile(m) and _check(m, roots):
                     out.append(m)
         return "\n".join(out[:200]) or "нет совпадений"
 
@@ -96,8 +100,13 @@ def register_builtin_tools(registry, cfg):
             for fn in fs:
                 fp = os.path.join(dp, fn)
                 try:
+                    if os.path.getsize(fp) > MAX_GREP_FILE_BYTES:
+                        continue
+                except OSError:
+                    continue
+                try:
                     with open(fp, encoding="utf-8") as f:
-                        lines = f.readlines()
+                        lines = f
                 except (OSError, UnicodeDecodeError):
                     continue
                 for i, l in enumerate(lines, 1):

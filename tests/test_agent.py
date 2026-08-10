@@ -132,6 +132,21 @@ class TestTools(unittest.TestCase):
         self.assertIn("запрещена", reg.call("read_file", json.dumps({"path": "/etc/passwd"})))
         self.assertIn("запрещена", reg.call("grep", json.dumps({"pattern": ".", "path": "/etc"})))
 
+    def test_rejects_invalid_tool_arguments(self):
+        reg = ToolRegistry()
+        reg.register("sample", "", {
+            "type": "object", "properties": {"count": {"type": "integer"}},
+            "required": ["count"],
+        }, lambda args: "ok")
+        self.assertIn("отсутствует", reg.call("sample", "{}"))
+        self.assertIn("должно иметь тип", reg.call("sample", '{"count":"one"}'))
+        self.assertEqual("ok", reg.call("sample", '{"count":1}'))
+
+    def test_truncates_tool_output(self):
+        reg = ToolRegistry()
+        reg.register("large", "", {"type": "object", "properties": {}}, lambda args: "x" * 20_000)
+        self.assertIn("результат обрезан", reg.call("large", "{}"))
+
 
 class TestSafety(unittest.TestCase):
     def test_gate(self):
