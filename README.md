@@ -132,6 +132,7 @@ python3 main.py "твоя задача"
 ```bash
 bash install.sh                       # установка в ~/.local/share/ideal-agent
 IDEAL_LLM_API_KEY=sk-... bash install.sh --service   # + автозапуск
+bash ~/.local/share/ideal-agent/update.sh            # обновление, конфиг сохраняется
 ```
 Поддерживаются Termux (Termux:Boot), Linux (systemd --user) и macOS (LaunchAgent).
 Установщик не перезаписывает существующий конфиг, создаёт защищённый HTTP-токен
@@ -147,6 +148,8 @@ IDEAL_LLM_API_KEY=sk-... bash install.sh --service
 
 После установки укажи в приложении `127.0.0.1:8080` и напечатанный токен.
 Для автозапуска поставь приложение Termux:Boot и один раз открой его.
+Для обновления из папки установки запусти `bash update.sh`; полезные опции:
+`--check`, `--branch beta`, `--no-restart` и `--no-tests`.
 Android-компаньон —
 см. `docs/android-companion.md` и готовый проект `android/idealagent/`
 (Jetpack Compose, собирается в Android Studio).
