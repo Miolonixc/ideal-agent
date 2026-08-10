@@ -10,6 +10,7 @@
   "allow": [],
   "deny": ["shell:rm -rf"],
   "workspace": "~/dev",
+  "sandbox_mode": "required",
   "skills_dir": "skills",
   "mcp_servers": [
     "python3 mcp_servers/fs_mcp.py",

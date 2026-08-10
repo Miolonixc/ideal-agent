@@ -22,6 +22,7 @@ class AgentConfig:
     allow: list = field(default_factory=list)
     deny: list = field(default_factory=list)
     workspace: str = os.path.expanduser("~/dev")
+    sandbox_mode: str = "required"
     context_budget: int = 6000
     skills_dir: Optional[str] = None
     mcp_servers: list = field(default_factory=list)

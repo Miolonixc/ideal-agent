@@ -63,16 +63,21 @@ class ApprovalGate:
         return "ask", None
 
 
-def run_sandboxed(command: str, timeout: int = 30, cwd: Optional[str] = None) -> str:
-    """Run a command only in an available OS sandbox.
+def run_sandboxed(command: str, timeout: int = 30, cwd: Optional[str] = None,
+                  mode: str = "required") -> str:
+    """Run a shell command under the configured sandbox policy.
 
-    Set IDEAL_ALLOW_UNSANDBOXED_SHELL=1 only for trusted local development.
+    ``required`` rejects execution without a sandbox, ``best-effort`` falls
+    back to the host, and ``disabled`` always uses the host. The latter two are
+    explicit configuration choices intended only for trusted local development.
     """
-    sandboxed = os.environ.get("IDEAL_SANDBOX", "1") != "0"
-    if sandboxed and not (_has_bwrap() or _has_unshare()):
-        return "ошибка: sandbox shell недоступен; установи bwrap или явно задай IDEAL_ALLOW_UNSANDBOXED_SHELL=1"
-    if not sandboxed and os.environ.get("IDEAL_ALLOW_UNSANDBOXED_SHELL") != "1":
-        return "ошибка: запуск без sandbox запрещён; задай IDEAL_ALLOW_UNSANDBOXED_SHELL=1 только в доверенной среде"
+    mode = (mode or "required").lower()
+    if mode not in ("required", "best-effort", "disabled"):
+        return "ошибка: sandbox_mode должен быть required, best-effort или disabled"
+    available = _has_bwrap() or _has_unshare()
+    sandboxed = mode != "disabled" and available
+    if mode == "required" and not available:
+        return "ошибка: sandbox shell недоступен; установи bwrap/unshare или выбери sandbox_mode=best-effort"
     wrapped = _sandbox_command(command, cwd) if sandboxed else command
     try:
         r = subprocess.run(

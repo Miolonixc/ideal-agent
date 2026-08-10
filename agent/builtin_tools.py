@@ -120,7 +120,10 @@ def register_builtin_tools(registry, cfg):
 
     def shell(args):
         cmd = args.get("command", "")
-        return safety.run_sandboxed(cmd, timeout=int(args.get("timeout", 30)), cwd=roots[0])
+        return safety.run_sandboxed(
+            cmd, timeout=int(args.get("timeout", 30)), cwd=roots[0],
+            mode=getattr(cfg, "sandbox_mode", "required"),
+        )
 
     registry.register(
         "read_file",

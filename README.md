@@ -59,6 +59,7 @@ python3 main.py "твоя задача"
 | `allow` | `[]` | Правила авто-разрешения (`shell:ls`, `read_file:*`) |
 | `deny` | `[]` | Правила блокировки (`shell:rm -rf`) |
 | `workspace` | `~/dev` | Рабочая папка (ограничение тулов) |
+| `sandbox_mode` | `required` | Shell sandbox: `required`, `best-effort` или `disabled` |
 | `context_budget` | `6000` | Бюджет токенов до компакшна истории |
 | `skills_dir` | — | Папка с навыками |
 | `mcp_servers` | `[]` | Список `["cmd args", ...]` MCP-серверов |
@@ -130,10 +131,10 @@ IDEAL_LLM_API_KEY=sk-... bash install.sh --service   # + автозапуск
 
 ## Безопасность и sandbox
 
-`shell`-тул изолируется по умолчанию: предпочтительно `bwrap` (root readonly,
+`shell`-тул изолируется по умолчанию (`sandbox_mode: required`): предпочтительно `bwrap` (root readonly,
 workspace доступен на запись, сеть отключена), иначе `unshare`. Если sandbox
-недоступен, shell отклоняется. Запуск без изоляции возможен только явным
-`IDEAL_SANDBOX=0 IDEAL_ALLOW_UNSANDBOXED_SHELL=1` в доверенной локальной среде.
+недоступен, shell отклоняется. `best-effort` и `disabled` допускают запуск без
+изоляции и предназначены только для доверенной локальной среды.
 HTTP по умолчанию слушает только `127.0.0.1`; для внешнего интерфейса задай
 `http.token` или `IDEAL_HTTP_TOKEN`. LLM-провайдер и его ключ настраиваются на
 сервере и не принимаются из HTTP-запросов. Всегда работают deny-правила
