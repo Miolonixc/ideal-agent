@@ -3,6 +3,7 @@ import json
 import io
 import os
 import tempfile
+import threading
 import unittest
 import urllib.error
 from unittest import mock
@@ -150,6 +151,19 @@ class TestCore(unittest.TestCase):
         agent.close()  # shutdown is idempotent
         with self.assertRaises(Exception):
             agent.audit.conn.execute("SELECT 1")
+
+    def test_agent_can_run_from_http_handler_thread(self):
+        """Agent is built by main(), while ThreadingHTTPServer runs it elsewhere."""
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp(), mode="full-auto"))
+        agent.provider = fake_provider_sequence([
+            {"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
+        ])
+        output = []
+        worker = threading.Thread(target=lambda: output.append(agent.run("ping")))
+        worker.start()
+        worker.join(timeout=5)
+        agent.close()
+        self.assertEqual(output, ["ok"])
 
 
 class TestMemory(unittest.TestCase):

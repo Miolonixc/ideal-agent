@@ -14,7 +14,9 @@ from .memory import state_dir
 class AuditLog:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or os.path.join(state_dir(), "audit.db")
-        self.conn = sqlite3.connect(self.db_path)
+        # Audit writes may come from the HTTP handler thread, not the thread
+        # that constructed Agent. Agent's run lock serializes these calls.
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS audit("
             "ts REAL, decision TEXT, tool TEXT, args TEXT, result TEXT)"

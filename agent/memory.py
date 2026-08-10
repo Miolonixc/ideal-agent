@@ -104,7 +104,10 @@ class BM25Index:
 class RepoIndex:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or os.path.join(state_dir(), "repo_index.db")
-        self.conn = sqlite3.connect(self.db_path)
+        # HTTPChannel handles every request in its own thread. Agent serializes
+        # operations with its run lock, so sharing this connection is safe once
+        # SQLite's default same-thread guard is disabled.
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS chunks(path TEXT, start INTEGER, text TEXT, embedding TEXT)"
         )
@@ -187,7 +190,7 @@ class RepoIndex:
 class MemoryStore:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or os.path.join(state_dir(), "memory.db")
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS memory(scope TEXT, key TEXT, value TEXT, created REAL, used REAL)"
         )
