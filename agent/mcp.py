@@ -8,8 +8,10 @@ from typing import Any, Dict, List, Optional
 
 class MCPClient:
     def __init__(self, command: str, args: Optional[List[str]] = None, timeout: int = 30):
+        self.command = command
+        self.args = list(args or [])
         self.proc = subprocess.Popen(
-            [command] + (args or []),
+            [command] + self.args,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, bufsize=1,
         )

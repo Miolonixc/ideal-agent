@@ -96,6 +96,7 @@ class Agent:
         self.memory = None
         self._context_ready = False
         self._closed = False
+        self._loaded_skills = []
         self._register_defaults()
 
     def _register_defaults(self):
@@ -118,7 +119,8 @@ class Agent:
 
     def load_skills_dir(self, skills_dir):
         from .skills import load_skills
-        return load_skills(self.registry, skills_dir)
+        self._loaded_skills = load_skills(self.registry, skills_dir)
+        return self._loaded_skills
 
     def connect_mcp(self, command, args=None):
         from .mcp import MCPClient

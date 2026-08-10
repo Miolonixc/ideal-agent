@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import os
+import tempfile
 from dataclasses import dataclass, field
 
 
@@ -73,3 +74,26 @@ def load(path=None):
     if cfg.skills_dir:
         cfg.skills_dir = os.path.expanduser(cfg.skills_dir)
     return cfg
+
+
+def save_runtime_settings(cfg, path=None):
+    """Сохраняет редактируемые из TUI поля, не перезаписывая API-ключ и unknown поля."""
+    path = os.path.expanduser(path or "~/.config/ideal-agent/config.json")
+    data = _read_file(path)
+    llm = data.setdefault("llm", {})
+    for key in ("provider", "base_url", "model", "temperature", "timeout", "max_tokens", "retries"):
+        llm[key] = getattr(cfg.llm, key)
+    for key in ("mode", "workspace", "sandbox_mode", "context_budget", "skills_dir", "use_context"):
+        data[key] = getattr(cfg, key)
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".ideal-agent-", dir=directory, text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(temporary, path)
+        os.chmod(path, 0o600)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)

@@ -7,7 +7,7 @@ import unittest
 import urllib.error
 from unittest import mock
 
-from agent.config import AgentConfig, load
+from agent.config import AgentConfig, load, save_runtime_settings
 from agent.core import Agent
 from agent.llm import OpenAICompatible, ProviderError
 from agent.memory import RepoIndex, MemoryStore
@@ -71,6 +71,22 @@ class TestConfig(unittest.TestCase):
                 f.flush()
                 cfg = load(f.name)
         self.assertEqual(cfg.llm.api_key, "gsk-test")
+
+    def test_save_runtime_settings_preserves_api_key_and_extra_fields(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"llm": {"api_key": "keep-me", "custom": "value"}, "other": True}, f)
+            cfg = AgentConfig()
+            cfg.llm.model = "new-model"
+            cfg.mode = "suggest"
+            save_runtime_settings(cfg, path)
+            with open(path, encoding="utf-8") as f:
+                saved = json.load(f)
+        self.assertEqual(saved["llm"]["api_key"], "keep-me")
+        self.assertEqual(saved["llm"]["custom"], "value")
+        self.assertEqual(saved["llm"]["model"], "new-model")
+        self.assertTrue(saved["other"])
 
 
 class TestLLM(unittest.TestCase):

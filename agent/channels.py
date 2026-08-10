@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import shutil
+import textwrap
 import time
 import urllib.parse
 import urllib.request
@@ -154,7 +155,9 @@ class TUIChannel(Channel):
             print("ошибка TUI:", e)
 
     def _loop(self, stdscr, agent):
-        agent.gate.mode = "full-auto"
+        from . import __version__
+        from .config import save_runtime_settings
+        from .llm import get_provider
         try:
             curses.start_color()
             curses.use_default_colors()
@@ -172,34 +175,123 @@ class TUIChannel(Channel):
             except curses.ошибка:
                 return 0
 
-        h, w = stdscr.getmaxyx()
-        hist = curses.newwin(h - 3, w, 1, 0)
-        inp = curses.newwin(2, w, h - 2, 0)
-        inp.keypad(True)
-        hist.scrollok(True)
+        h = w = 0
+        hist = inp = None
         stdscr.keypad(True)
 
         history: List[str] = []
         hist_idx = 0
         buf = ""
+        screen = "chat"
+        settings_idx = 0
+        view_offset = 0
+        settings = [
+            ("Провайдер", "provider"), ("Модель", "model"), ("Base URL", "base_url"),
+            ("Режим апрува", "mode"), ("Workspace", "workspace"),
+            ("Sandbox", "sandbox_mode"), ("Контекст", "use_context"),
+            ("Таймаут (сек)", "timeout"), ("Повторы HTTP", "retries"),
+        ]
+
+        def rebuild_windows():
+            nonlocal h, w, hist, inp
+            h, w = stdscr.getmaxyx()
+            h, w = max(8, h), max(24, w)
+            hist = curses.newwin(h - 4, w, 1, 0)
+            inp = curses.newwin(3, w, h - 3, 0)
+            inp.keypad(True)
+            hist.scrollok(True)
+
+        def setting_value(key):
+            if key in ("provider", "model", "base_url", "timeout", "retries"):
+                return str(getattr(agent.cfg.llm, key))
+            return str(getattr(agent.cfg, key))
+
+        def wrapped_lines():
+            width = max(8, w - 4)
+            out = []
+            for raw in self.lines:
+                if raw.startswith("you> "):
+                    prefix, color, body = "you> ", c(2), raw[5:]
+                elif raw.startswith("agent> "):
+                    prefix, color, body = "agent> ", c(1), raw[7:]
+                else:
+                    prefix, color, body = "", c(5), raw
+                chunks = textwrap.wrap(body, width=max(1, width - len(prefix)),
+                                       replace_whitespace=False, drop_whitespace=False,
+                                       break_long_words=True, break_on_hyphens=False) or [""]
+                out.append((prefix + chunks[0], color))
+                indent = " " * len(prefix)
+                out.extend((indent + chunk, color) for chunk in chunks[1:])
+            return out
+
+        def save_settings():
+            try:
+                save_runtime_settings(agent.cfg, getattr(agent.cfg, "_config_path", None))
+                return "Настройки сохранены"
+            except Exception as exc:
+                return f"Не удалось сохранить: {exc}"
+
+        def edit_setting():
+            nonlocal settings_idx
+            label, key = settings[settings_idx]
+            if key == "use_context":
+                agent.cfg.use_context = not agent.cfg.use_context
+            elif key == "mode":
+                modes = ("suggest", "auto", "full-auto")
+                agent.cfg.mode = modes[(modes.index(agent.cfg.mode) + 1) % len(modes)] if agent.cfg.mode in modes else "auto"
+                agent.gate.mode = agent.cfg.mode
+            elif key == "sandbox_mode":
+                modes = ("required", "best-effort", "disabled")
+                current = agent.cfg.sandbox_mode
+                agent.cfg.sandbox_mode = modes[(modes.index(current) + 1) % len(modes)] if current in modes else "required"
+            else:
+                try:
+                    inp.erase()
+                    inp.box()
+                    inp.addstr(0, 2, f" {label} ", c(5) | curses.A_BOLD)
+                    inp.addstr(1, 1, setting_value(key)[: max(1, w - 3)])
+                    inp.move(1, min(w - 2, len(setting_value(key)) + 1))
+                    curses.echo()
+                    raw = inp.getstr(1, 1, max(1, w - 3)).decode("utf-8").strip()
+                    curses.noecho()
+                except Exception:
+                    return
+                if not raw:
+                    return
+                try:
+                    if key in ("timeout", "retries"):
+                        setattr(agent.cfg.llm, key, int(raw))
+                    elif key in ("provider", "model", "base_url"):
+                        old = (agent.cfg.llm.provider, agent.cfg.llm.model, agent.cfg.llm.base_url, agent.provider)
+                        setattr(agent.cfg.llm, key, raw)
+                        try:
+                            agent.provider = get_provider(agent.cfg.llm)
+                        except Exception:
+                            agent.cfg.llm.provider, agent.cfg.llm.model, agent.cfg.llm.base_url, agent.provider = old
+                            raise
+                    else:
+                        setattr(agent.cfg, key, raw)
+                except Exception as exc:
+                    self.lines.append(f"system> Некорректное значение: {exc}")
+                    return
+            self.lines.append("system> " + save_settings())
 
         def draw_input():
             inp.erase()
             inp.box()
             try:
-                inp.addstr(0, 2, " ввод (Ctrl+D выход) ", c(5) | curses.A_BOLD)
+                inp.addstr(0, 2, " ввод · F2 настройки · F3 модули · Ctrl+D выход ", c(5) | curses.A_BOLD)
             except curses.ошибка:
                 pass
-            prompt = "> " + buf
-            try:
-                inp.addstr(1, 1, prompt[: w - 2], c(2))
-            except curses.ошибка:
-                pass
+            for row, part in enumerate(textwrap.wrap("> " + buf, max(1, w - 2),
+                                                      replace_whitespace=False, drop_whitespace=False)[:2]):
+                try: inp.addstr(1 + row, 1, part[: w - 2], c(2))
+                except curses.ошибка: pass
             inp.noutrefresh()
 
         def draw_header():
             stdscr.erase()
-            title = " ⚡ " + self.title + " "
+            title = f" ⚡ {self.title} v{__version__} · {agent.provider.__class__.__name__}/{agent.provider.model} "
             try:
                 stdscr.addstr(0, 0, title, c(1) | curses.A_BOLD)
                 stdscr.addstr(0, len(title), " " * (w - len(title) - 1), c(5))
@@ -208,7 +300,7 @@ class TUIChannel(Channel):
             stdscr.noutrefresh()
 
         def draw_footer():
-            footer = " ↑/↓ история · Enter отправить · Ctrl+D выход "
+            footer = " ↑/↓ история · PgUp/PgDn прокрутка · F2 настройки · F3 модули · Ctrl+D выход "
             try:
                 stdscr.addstr(h - 1, 0, footer[: w - 1], c(3))
             except curses.ошибка:
@@ -220,25 +312,42 @@ class TUIChannel(Channel):
             hist.erase()
             hist.box()
             maxl = hist.getmaxyx()[0] - 2
-            view = self.lines[-maxl:]
-            for i, ln in enumerate(view):
+            if screen == "settings":
+                view = [("Настройки (Enter изменить/переключить, S сохранить, Esc назад)", c(1))]
+                view.extend((f"{'›' if i == settings_idx else ' '} {label}: {setting_value(key)}", c(2 if i == settings_idx else 5))
+                            for i, (label, key) in enumerate(settings))
+                view.append((f"Конфиг: {getattr(agent.cfg, '_config_path', '~/.config/ideal-agent/config.json')}", c(3)))
+            elif screen == "modules":
+                clients = getattr(agent, "_mcp_clients", [])
+                view = [("Подключённые модули (F3/Esc назад)", c(1)),
+                        (f"Tools: {', '.join(sorted(agent.registry._tools)) or 'нет'}", c(5)),
+                        (f"Skills: {', '.join(getattr(agent, '_loaded_skills', [])) or 'нет'}", c(5)),
+                        (f"MCP: {len(clients)} подключено", c(3))]
+                for client in clients:
+                    state = "работает" if client.proc.poll() is None else f"завершён ({client.proc.returncode})"
+                    view.append((f"  • {client.command} {' '.join(client.args)} — {state}", c(2 if client.proc.poll() is None else 4)))
+                if not clients and agent.cfg.mcp_servers:
+                    view.extend((f"  • {spec} — не подключён", c(4)) for spec in agent.cfg.mcp_servers)
+            else:
+                view = wrapped_lines()
+            start = max(0, len(view) - maxl - view_offset)
+            end = len(view) - view_offset if view_offset else len(view)
+            for i, item in enumerate(view[start:end][:maxl]):
+                ln, color = item
                 try:
-                    if ln.startswith("you> "):
-                        hist.addstr(1 + i, 1, ln[: w - 2], c(2))
-                    elif ln.startswith("agent> "):
-                        hist.addstr(1 + i, 1, ln[: w - 2], c(1))
-                    else:
-                        hist.addstr(1 + i, 1, ln[: w - 2], c(5))
+                    hist.addstr(1 + i, 1, ln[: w - 2], color)
                 except curses.ошибка:
                     pass
             hist.noutrefresh()
             draw_footer()
-            draw_input()
+            if screen == "chat": draw_input()
             curses.doupdate()
 
+        rebuild_windows()
         refresh()
         while True:
-            ch = inp.get_wch()
+            source = inp if screen == "chat" else stdscr
+            ch = source.get_wch()
             if isinstance(ch, int):
                 code, char = ch, None
             elif isinstance(ch, tuple):
@@ -251,10 +360,36 @@ class TUIChannel(Channel):
 
             o = ord(char) if char else None
 
+            if code == getattr(curses, "KEY_RESIZE", -999):
+                rebuild_windows(); refresh(); continue
             if code in (4, -1) or o == 4:
                 break
             if code == 3 or o == 3:
                 break
+            if code == getattr(curses, "KEY_F2", -999) or o == 15:
+                screen = "settings"; view_offset = 0; refresh(); continue
+            if code == getattr(curses, "KEY_F3", -999):
+                screen = "chat" if screen == "modules" else "modules"
+                view_offset = 0; refresh(); continue
+            if screen != "chat":
+                if code == 27 or o == 27 or code == getattr(curses, "KEY_F3", -998):
+                    screen = "chat"; refresh(); continue
+                if code == curses.KEY_UP:
+                    settings_idx = max(0, settings_idx - 1); refresh(); continue
+                if code == curses.KEY_DOWN:
+                    settings_idx = min(len(settings) - 1, settings_idx + 1); refresh(); continue
+                if screen == "settings" and (code in (10, 13, curses.KEY_ENTER) or o in (10, 13)):
+                    edit_setting(); refresh(); continue
+                if screen == "settings" and char and char.lower() == "s":
+                    self.lines.append("system> " + save_settings()); refresh(); continue
+                continue
+            if code == getattr(curses, "KEY_F1", -999) or (char and char == "?"):
+                self.lines.append("system> /settings, /modules, /about; F2 настройки, F3 модули")
+                refresh(); continue
+            if code == getattr(curses, "KEY_PPAGE", -999):
+                view_offset = min(len(wrapped_lines()), view_offset + max(1, h - 6)); refresh(); continue
+            if code == getattr(curses, "KEY_NPAGE", -999):
+                view_offset = max(0, view_offset - max(1, h - 6)); refresh(); continue
             if code in (curses.KEY_UP,):
                 if history:
                     hist_idx = max(0, hist_idx - 1)
@@ -274,8 +409,16 @@ class TUIChannel(Channel):
             if code in (10, 13, curses.KEY_ENTER) or o in (10, 13):
                 text = buf.strip()
                 buf = ""
+                view_offset = 0
                 if text in ("/exit", "/quit"):
                     break
+                if text == "/settings":
+                    screen = "settings"; refresh(); continue
+                if text == "/modules":
+                    screen = "modules"; refresh(); continue
+                if text == "/about":
+                    self.lines.append(f"system> {self.title} v{__version__} · Python {sys.version.split()[0]}")
+                    refresh(); continue
                 if not text:
                     refresh()
                     continue

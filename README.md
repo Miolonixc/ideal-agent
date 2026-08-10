@@ -94,9 +94,10 @@ python3 main.py "твоя задача"
 ## Каналы
 
 - **CLI** — `python3 main.py "задача"` (одноразово) или `python3 main.py cli` (цикл).
-- **TUI** — `python3 main.py tui` (ncurses: история сверху, ввод снизу, кириллица,
-  `Ctrl+D`/`Ctrl+C` выход, ↑/↓ история, `/exit`). Апрув-гейт в TUI принудительно
-  `full-auto`.
+- **TUI** — `python3 main.py tui`: история сверху, ввод снизу, кириллица и перенос
+  текста. `F2` открывает настройки (провайдер, модель, workspace, sandbox и retry),
+  `F3` — подключённые tools/skills/MCP, `PgUp/PgDn` прокручивает историю,
+  `/about` показывает версию. Режим апрува берётся из конфига.
 - **Telegram** — `python3 main.py telegram` (токен из env `TELEGRAM_BOT_TOKEN` или
   `telegram.token` в конфиге; белый список `ALLOWED_USER_IDS`/`telegram.allowed`).
   Поддерживаются слэш-команды (см. ниже).

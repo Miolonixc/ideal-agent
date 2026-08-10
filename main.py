@@ -40,7 +40,9 @@ def main():
         sub = None
         extra = rest
 
-    cfg = load(opts["config"])
+    config_path = opts["config"] or os.path.expanduser("~/.config/ideal-agent/config.json")
+    cfg = load(config_path)
+    cfg._config_path = config_path
     if opts["mode"]:
         cfg.mode = opts["mode"]
     if opts["provider"]:
