@@ -248,11 +248,12 @@ class TUIChannel(Channel):
                 try:
                     inp.erase()
                     inp.box()
-                    inp.addstr(0, 2, f" {label} ", c(5) | curses.A_BOLD)
-                    inp.addstr(1, 1, setting_value(key)[: max(1, w - 3)])
-                    inp.move(1, min(w - 2, len(setting_value(key)) + 1))
+                    current = setting_value(key)
+                    inp.addstr(0, 2, f" {label}: {current} ", c(5) | curses.A_BOLD)
+                    inp.addstr(1, 1, "> ", c(2))
+                    inp.move(1, 3)
                     curses.echo()
-                    raw = inp.getstr(1, 1, max(1, w - 3)).decode("utf-8").strip()
+                    raw = inp.getstr(1, 3, max(1, w - 5)).decode("utf-8").strip()
                     curses.noecho()
                 except Exception:
                     return
