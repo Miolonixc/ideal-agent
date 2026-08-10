@@ -181,6 +181,8 @@ class TestMCP(unittest.TestCase):
         self.assertTrue(any(t["name"] == "echo" for t in mc.list_tools()))
         self.assertEqual(mc.call_tool("echo", {"text": "hi"})["content"][0]["text"], "hi")
         mc.close()
+        with self.assertRaises(RuntimeError):
+            mc.list_tools()
 
 
 class TestChannels(unittest.TestCase):
