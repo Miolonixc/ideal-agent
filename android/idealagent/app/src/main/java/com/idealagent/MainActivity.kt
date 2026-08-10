@@ -9,11 +9,21 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.PixelFormat
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.app.Activity
+import android.media.ImageReader
+import android.media.projection.MediaProjectionManager
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
+import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -312,6 +322,51 @@ fun uriToAttachment(ctx: Context, uri: Uri): Attachment? {
     } catch (_: Exception) { null }
 }
 
+fun captureScreen(ctx: Context, data: Intent, onCaptured: (Attachment) -> Unit) {
+    try {
+        val mgr = ctx.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        val projection = mgr.getMediaProjection(Activity.RESULT_OK, data)
+        val metrics = ctx.resources.displayMetrics
+        val w = metrics.widthPixels
+        val h = metrics.heightPixels
+        val dpi = metrics.densityDpi
+        val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 1)
+        val display = projection.createVirtualDisplay(
+            "capture", w, h, dpi,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            reader.surface, null, null,
+        )
+        val thread = HandlerThread("screen-capture").also { it.start() }
+        Handler(thread.looper).postDelayed({
+            try {
+                val image = reader.acquireLatestImage()
+                var bmp: Bitmap? = null
+                if (image != null) {
+                    val plane = image.planes[0]
+                    val buffer = plane.buffer
+                    val rowPadding = plane.rowStride - plane.pixelStride * w
+                    val clean = Bitmap.createBitmap(w + rowPadding / plane.pixelStride, h, Bitmap.Config.ARGB_8888)
+                    clean.copyPixelsFromBuffer(buffer)
+                    image.close()
+                    bmp = if (rowPadding == 0) clean else Bitmap.createBitmap(clean, 0, 0, w, h)
+                }
+                val out = ByteArrayOutputStream()
+                bmp?.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                val bytes = out.toByteArray()
+                Handler(Looper.getMainLooper()).post {
+                    onCaptured(Attachment("screenshot_${System.currentTimeMillis()}.jpg", "image/jpeg", bytes))
+                }
+            } catch (_: Exception) {
+            } finally {
+                try { display.release() } catch (_: Exception) { }
+                try { projection.stop() } catch (_: Exception) { }
+                try { reader.close() } catch (_: Exception) { }
+                thread.quitSafely()
+            }
+        }, 350)
+    } catch (_: Exception) { }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen() {
@@ -338,6 +393,15 @@ fun ChatScreen() {
             attachments.add(Attachment("camera_${System.currentTimeMillis()}.jpg", "image/jpeg", out.toByteArray()))
         }
     }
+    val projectionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        if (res.resultCode == Activity.RESULT_OK && res.data != null) {
+            captureScreen(context, res.data!!) { att -> attachments.add(att) }
+        }
+    }
+    fun startScreenCapture() {
+        val mgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        projectionLauncher.launch(mgr.createScreenCaptureIntent())
+    }
     val listState = rememberLazyListState()
 
     LaunchedEffect(host) { prefs.edit().putString("host", host).apply() }
@@ -352,10 +416,17 @@ fun ChatScreen() {
         prompt = ""
         attachments.clear()
         messages.add(Message("user", if (p.isBlank()) "(вложение)" else p))
+        val agentIdx = messages.size
+        messages.add(Message("agent", ""))
         busy = true
         scope.launch {
-            val r = askAgent(h, p, pv, md, key, atts)
-            messages.add(Message("agent", r))
+            askAgentStream(h, p, pv, md, key, atts) { chunk ->
+                val cur = messages.getOrNull(agentIdx)?.text ?: ""
+                messages[agentIdx] = Message("agent", cur + chunk)
+            }
+            if (messages.getOrNull(agentIdx)?.text.isNullOrBlank()) {
+                messages[agentIdx] = Message("agent", "(нет ответа)")
+            }
             busy = false
         }
     }
@@ -489,6 +560,10 @@ fun ChatScreen() {
                                 DropdownMenuItem(
                                     text = { Text("Камера") },
                                     onClick = { attachMenu = false; camLauncher.launch(null) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Скриншот экрана") },
+                                    onClick = { attachMenu = false; startScreenCapture() },
                                 )
                             }
                         }
@@ -852,4 +927,59 @@ suspend fun askAgent(host: String, prompt: String, provider: String, model: Stri
             "ошибка: ${e.message}"
         }
     }
+}
+
+suspend fun askAgentStream(
+    host: String, prompt: String, provider: String, model: String, apiKey: String,
+    attachments: List<Attachment> = emptyList(),
+    onChunk: (String) -> Unit,
+): String = withContext(Dispatchers.IO) {
+    val full = StringBuilder()
+    try {
+        val url = URL("http://$host/message/stream")
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.connectTimeout = 120_000
+        conn.readTimeout = 120_000
+        val obj = JSONObject()
+        obj.put("text", prompt)
+        if (provider.isNotBlank()) obj.put("provider", provider)
+        if (model.isNotBlank()) obj.put("model", model)
+        if (apiKey.isNotBlank()) obj.put("api_key", apiKey)
+        if (attachments.isNotEmpty()) {
+            val arr = org.json.JSONArray()
+            for (a in attachments) {
+                val o = JSONObject()
+                o.put("name", a.name)
+                o.put("mime", a.mime)
+                o.put("data", Base64.encodeToString(a.bytes, Base64.NO_WRAP))
+                arr.put(o)
+            }
+            obj.put("attachments", arr)
+        }
+        conn.outputStream.write(obj.toString().toByteArray())
+        val reader = conn.inputStream.bufferedReader()
+        var line = reader.readLine()
+        while (line != null) {
+            if (line.startsWith("data:")) {
+                val payload = line.removePrefix("data:").trim()
+                if (payload == "[DONE]") break
+                try {
+                    val chunk = JSONObject(payload).optString("chunk", "")
+                    if (chunk.isNotEmpty()) {
+                        full.append(chunk)
+                        withContext(Dispatchers.Main) { onChunk(chunk) }
+                    }
+                } catch (_: Exception) { }
+            }
+            line = reader.readLine()
+        }
+    } catch (e: Exception) {
+        val msg = "\nошибка: ${e.message}"
+        full.append(msg)
+        withContext(Dispatchers.Main) { onChunk(msg) }
+    }
+    full.toString()
 }
