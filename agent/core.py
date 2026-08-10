@@ -95,6 +95,7 @@ class Agent:
         self.repo_index = None
         self.memory = None
         self._context_ready = False
+        self._closed = False
         self._register_defaults()
 
     def _register_defaults(self):
@@ -146,6 +147,22 @@ class Agent:
             self.registry.register(name, t.get("description", ""), schema, make_handler(client, name))
         self._mcp_clients.append(client)
         return [t["name"] for t in tools]
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        for client in self._mcp_clients:
+            try:
+                client.close()
+            except Exception:
+                pass
+        for resource in (self.repo_index, self.memory, self.audit):
+            if resource is not None:
+                try:
+                    resource.close()
+                except Exception:
+                    pass
 
     def _extract_tool_calls(self, msg):
         tcs = msg.get("tool_calls")

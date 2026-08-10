@@ -27,6 +27,9 @@ class AuditLog:
         )
         self.conn.commit()
 
+    def close(self):
+        self.conn.close()
+
 
 class ApprovalGate:
     def __init__(self, mode: str = "auto", allow: Optional[List[str]] = None,

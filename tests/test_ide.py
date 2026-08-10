@@ -12,6 +12,11 @@ from agent.core import Agent
 
 
 class TestIDEChannel(unittest.TestCase):
+    def test_public_listener_requires_token(self):
+        channel = SocketChannel(host="0.0.0.0", token="secret")
+        self.assertFalse(channel._authorized({}))
+        self.assertTrue(channel._authorized({"token": "secret"}))
+
     def test_socket_roundtrip(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("127.0.0.1", 0))

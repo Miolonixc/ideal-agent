@@ -29,6 +29,7 @@ class AgentConfig:
     use_context: bool = True
     telegram: Optional[dict] = None
     http: Optional[dict] = None
+    ide: Optional[dict] = None
 
 
 def _read_file(path):

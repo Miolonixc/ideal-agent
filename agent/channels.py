@@ -30,6 +30,9 @@ class Channel:
     def write(self, msg: Message):
         raise NotImplementedError
 
+    def close(self):
+        pass
+
 
 class CLIChannel(Channel):
     def __init__(self, prompt: str = "you> "):
@@ -98,35 +101,39 @@ class TelegramChannel(Channel):
 
 
 def serve(channel: Channel, agent, stop_on_none: bool = True):
-    while True:
-        try:
-            msg = channel.read()
-        except Exception as e:
-            time.sleep(1)
-            continue
-        if msg is None:
-            if stop_on_none:
-                break
-            continue
-        cmd_reply = agent.command(msg.text)
-        if cmd_reply == "__EXIT__":
-            break
-        if cmd_reply is not None:
+    try:
+        while True:
             try:
-                channel.write(Message(cmd_reply, msg.chat_id))
+                msg = channel.read()
+            except Exception as e:
+                time.sleep(1)
+                continue
+            if msg is None:
+                if stop_on_none:
+                    break
+                continue
+            cmd_reply = agent.command(msg.text)
+            if cmd_reply == "__EXIT__":
+                break
+            if cmd_reply is not None:
+                try:
+                    channel.write(Message(cmd_reply, msg.chat_id))
+                except Exception as e:
+                    print("ошибка отправки:", e)
+                continue
+            try:
+                reply = agent.run(msg.text)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                reply = f"[ошибка агента] {e}"
+            try:
+                channel.write(Message(reply, msg.chat_id))
             except Exception as e:
                 print("ошибка отправки:", e)
-            continue
-        try:
-            reply = agent.run(msg.text)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            reply = f"[ошибка агента] {e}"
-        try:
-            channel.write(Message(reply, msg.chat_id))
-        except Exception as e:
-            print("ошибка отправки:", e)
+    finally:
+        channel.close()
+        agent.close()
 
 
 class TUIChannel(Channel):
@@ -304,23 +311,35 @@ class TUIChannel(Channel):
 
 
 class SocketChannel(Channel):
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765):
+    MAX_LINE_BYTES = 64 * 1024
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765, token: str = ""):
         self.host = host
         self.port = port
+        self.token = token
         self._conn = None
         self._file = None
+        self._server = None
+
+    def _authorized(self, obj):
+        if not self.token:
+            return self.host in ("127.0.0.1", "::1", "localhost")
+        return hmac.compare_digest(str(obj.get("token", "")), self.token)
 
     def read(self) -> Optional[Message]:
         import socket
         if self._conn is None:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((self.host, self.port))
-            s.listen(1)
+            self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._server.bind((self.host, self.port))
+            self._server.listen(1)
             print(f"IDE channel: слушаю {self.host}:{self.port}")
-            self._conn, _ = s.accept()
+            self._conn, _ = self._server.accept()
             self._file = self._conn.makefile("rwb", buffering=0)
         for line in self._file:
+            if len(line) > self.MAX_LINE_BYTES:
+                self.write(Message("ошибка: сообщение слишком длинное"))
+                return None
             line = line.strip()
             if not line:
                 continue
@@ -328,12 +347,24 @@ class SocketChannel(Channel):
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not self._authorized(obj):
+                self.write(Message("ошибка: unauthorized"))
+                return None
             return Message(obj.get("text", ""))
         return None
 
     def write(self, msg: Message):
         if self._file:
             self._file.write((json.dumps({"text": msg.text}) + "\n").encode())
+
+    def close(self):
+        for resource in (self._file, self._conn, self._server):
+            if resource is not None:
+                try:
+                    resource.close()
+                except OSError:
+                    pass
+        self._file = self._conn = self._server = None
 
 
 class HTTPChannel(Channel):

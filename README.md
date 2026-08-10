@@ -67,6 +67,8 @@ python3 main.py "твоя задача"
 | `http.host` | `127.0.0.1` | Адрес HTTP-канала; внешний адрес требует `http.token` |
 | `http.token` | — | Токен для HTTP-клиентов (`X-Ideal-Agent-Token`) |
 | `http.github_webhook_secret` | — | Secret для проверки `X-Hub-Signature-256` GitHub webhook |
+| `ide.host` | `127.0.0.1` | Адрес IDE TCP-канала; внешний адрес требует `ide.token` |
+| `ide.token` | — | Токен IDE handshake в первом JSON-сообщении |
 | `telegram.token` | — | Токен Telegram-бота (альтернатива env `TELEGRAM_BOT_TOKEN`) |
 | `telegram.allowed` | `[]` | Список разрешённых chat_id |
 

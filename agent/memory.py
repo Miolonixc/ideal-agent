@@ -169,6 +169,9 @@ class RepoIndex:
             return [c for _, c in scored[:top_k]]
         return self.bm25.search(query, top_k)
 
+    def close(self):
+        self.conn.close()
+
 
 class MemoryStore:
     def __init__(self, db_path: Optional[str] = None):
@@ -221,6 +224,9 @@ class MemoryStore:
         for f in facts:
             self.add("auto", f, f)
         return facts
+
+    def close(self):
+        self.conn.close()
 
 
 def _parse_json_list(data: str) -> List[str]:

@@ -65,9 +65,22 @@ class MCPClient:
         return self._request("tools/call", {"name": name, "arguments": arguments})
 
     def close(self):
+        if self.proc.poll() is not None:
+            return
         try:
             self.proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "shutdown"}) + "\n")
             self.proc.stdin.flush()
-        except OSError:
+        except (OSError, ValueError):
             pass
-        self.proc.terminate()
+        try:
+            self.proc.terminate()
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait(timeout=2)
+        finally:
+            for stream in (self.proc.stdin, self.proc.stdout):
+                try:
+                    stream.close()
+                except OSError:
+                    pass

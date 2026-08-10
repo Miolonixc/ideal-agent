@@ -87,6 +87,14 @@ class TestCore(unittest.TestCase):
         self.assertEqual(out, "готово")
         self.assertIn("t", agent.history.messages[-2]["content"])
 
+    def test_close_releases_resources(self):
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp()))
+        agent._ensure_context()
+        agent.close()
+        agent.close()  # shutdown is idempotent
+        with self.assertRaises(Exception):
+            agent.audit.conn.execute("SELECT 1")
+
 
 class TestMemory(unittest.TestCase):
     def test_repo_and_kv(self):

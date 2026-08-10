@@ -22,6 +22,10 @@
     "token": "change-this-to-a-long-random-token",
     "github_webhook_secret": ""
   },
+  "ide": {
+    "host": "127.0.0.1",
+    "token": ""
+  },
   "telegram": {
     "token": "",
     "allowed": [77002359]

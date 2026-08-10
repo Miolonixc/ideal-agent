@@ -76,8 +76,11 @@ def main():
 
     if sub == "ide":
         from agent.channels import SocketChannel
+        ide_cfg = getattr(cfg, "ide", None) or {}
         port = opts["port"] or int(os.environ.get("IDEAL_IDE_PORT", "8765"))
-        serve(SocketChannel(port=port), agent)
+        host = os.environ.get("IDEAL_IDE_HOST", ide_cfg.get("host", "127.0.0.1"))
+        ide_token = os.environ.get("IDEAL_IDE_TOKEN", ide_cfg.get("token", ""))
+        serve(SocketChannel(host=host, port=port, token=ide_token), agent)
         return
 
     if sub == "http":
@@ -97,6 +100,10 @@ def main():
         tg_cfg = getattr(cfg, "telegram", None) or {}
         allowed_env = [int(x) for x in os.environ.get("ALLOWED_USER_IDS", "").replace(",", " ").split() if x]
         allowed = allowed_env or tg_cfg.get("allowed", [])
+        if not allowed and os.environ.get("IDEAL_ALLOW_PUBLIC_TELEGRAM") != "1":
+            print("telegram.allowed обязателен; для явного публичного режима задай IDEAL_ALLOW_PUBLIC_TELEGRAM=1")
+            agent.close()
+            return
         channel = TelegramChannel(token, allowed=allowed)
         print("telegram-канал: запущен long-poll")
         serve(channel, agent)
