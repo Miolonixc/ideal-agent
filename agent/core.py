@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+import threading
 from typing import Any, Dict, List, Optional
 
 from . import llm as llm_mod
@@ -87,6 +88,7 @@ class Agent:
         self.provider = llm_mod.get_provider(cfg.llm)
         self._sessions: Dict[str, HistoryManager] = {}
         self._session_id = "default"
+        self._run_lock = threading.RLock()
         self.registry = registry or ToolRegistry()
         self.gate = safety.ApprovalGate(cfg.mode, cfg.allow, cfg.deny)
         self.audit = safety.AuditLog()
@@ -229,6 +231,11 @@ class Agent:
             return "навыки и тулы: " + ", ".join(names)
         return None
 
+    def command_in_session(self, session_id, text):
+        with self._run_lock:
+            self._session_id = session_id or "default"
+            return self.command(text)
+
     def _handle_tools(self, msg, tool_calls):
         if "tool_calls" in msg:
             self.history.add(msg)
@@ -295,6 +302,12 @@ class Agent:
             return reply
         return "[достигнут лимит итераций]"
 
+    def run_in_session(self, session_id, text, attachments=None):
+        """Keep mutable history and provider state isolated between HTTP requests."""
+        with self._run_lock:
+            self._session_id = session_id or "default"
+            return self.run(text, attachments)
+
     def stream(self, text, attachments=None):
         """Генератор: yield куски ответа по мере генерации (streaming)."""
         self.history.add(self._build_user_message(text, attachments))
@@ -340,3 +353,8 @@ class Agent:
             yield reply
             return
         yield "[достигнут лимит итераций]"
+
+    def stream_in_session(self, session_id, text, attachments=None):
+        with self._run_lock:
+            self._session_id = session_id or "default"
+            yield from self.stream(text, attachments)

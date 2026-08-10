@@ -83,8 +83,11 @@ def main():
     if sub == "http":
         from agent.channels import HTTPChannel
         port = opts["port"] or int(os.environ.get("IDEAL_HTTP_PORT", "8080"))
-        host = os.environ.get("IDEAL_HTTP_HOST", "0.0.0.0")
-        HTTPChannel(host=host, port=port).run(agent)
+        http_cfg = getattr(cfg, "http", None) or {}
+        host = os.environ.get("IDEAL_HTTP_HOST", http_cfg.get("host", "127.0.0.1"))
+        token = os.environ.get("IDEAL_HTTP_TOKEN", http_cfg.get("token", ""))
+        secret = os.environ.get("IDEAL_GITHUB_WEBHOOK_SECRET", http_cfg.get("github_webhook_secret", ""))
+        HTTPChannel(host=host, port=port, token=token, github_webhook_secret=secret).run(agent)
         return
 
     if sub == "telegram" or (sub is None and token and not extra):

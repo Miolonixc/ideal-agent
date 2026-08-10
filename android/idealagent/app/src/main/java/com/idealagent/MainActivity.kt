@@ -94,6 +94,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -135,6 +136,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
@@ -150,6 +152,8 @@ class MainActivity : ComponentActivity() {
 data class Message(val role: String, val text: String)
 
 data class Attachment(val name: String, val mime: String, val bytes: ByteArray)
+
+private const val MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 data class Session(val id: String, var name: String, val messages: MutableList<Message>)
 
@@ -335,6 +339,18 @@ fun openUrl(ctx: Context, url: String) {
     }
 }
 
+fun readLimited(input: InputStream, limit: Int = MAX_ATTACHMENT_BYTES): ByteArray? {
+    val out = ByteArrayOutputStream()
+    val buffer = ByteArray(16 * 1024)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        if (out.size() + count > limit) return null
+        out.write(buffer, 0, count)
+    }
+    return out.toByteArray()
+}
+
 fun uriToAttachment(ctx: Context, uri: Uri): Attachment? {
     return try {
         val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
@@ -354,8 +370,9 @@ fun uriToAttachment(ctx: Context, uri: Uri): Attachment? {
             bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)
             out.toByteArray()
         } else {
-            ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            ctx.contentResolver.openInputStream(uri)?.use { readLimited(it) } ?: return null
         }
+        if (bytes.size > MAX_ATTACHMENT_BYTES) return null
         Attachment(name, mime, bytes)
     } catch (_: Exception) { null }
 }
@@ -451,6 +468,17 @@ fun loadApiKey(prefs: SharedPreferences): String {
     return runCatching { KeyStoreCrypto.decrypt(enc) }.getOrDefault("")
 }
 
+fun loadSecret(prefs: SharedPreferences, name: String): String {
+    val enc = prefs.getString(name, "") ?: ""
+    if (enc.isBlank()) return ""
+    return runCatching { KeyStoreCrypto.decrypt(enc) }.getOrDefault("")
+}
+
+fun saveSecret(prefs: SharedPreferences, name: String, value: String) {
+    if (value.isBlank()) prefs.edit().remove(name).apply()
+    else prefs.edit().putString(name, KeyStoreCrypto.encrypt(value)).apply()
+}
+
 fun saveApiKey(prefs: SharedPreferences, key: String) {
     if (key.isBlank()) prefs.edit().remove("api_key_enc").apply()
     else prefs.edit().putString("api_key_enc", KeyStoreCrypto.encrypt(key)).apply()
@@ -502,10 +530,8 @@ fun saveSessions(ctx: Context, list: List<Session>) {
 fun ChatScreen() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("ideal_agent", Context.MODE_PRIVATE) }
-    var host by remember { mutableStateOf(prefs.getString("host", "192.168.2.107:8080") ?: "192.168.2.107:8080") }
-    var provider by remember { mutableStateOf(prefs.getString("provider", "") ?: "") }
-    var model by remember { mutableStateOf(prefs.getString("model", "") ?: "") }
-    var apiKey by remember { mutableStateOf(loadApiKey(prefs)) }
+    var host by remember { mutableStateOf(prefs.getString("host", "127.0.0.1:8080") ?: "127.0.0.1:8080") }
+    var accessToken by remember { mutableStateOf(loadSecret(prefs, "http_token_enc")) }
     var prompt by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -613,9 +639,7 @@ fun ChatScreen() {
     val listState = rememberLazyListState()
 
     LaunchedEffect(host) { prefs.edit().putString("host", host).apply() }
-    LaunchedEffect(provider) { prefs.edit().putString("provider", provider).apply() }
-    LaunchedEffect(model) { prefs.edit().putString("model", model).apply() }
-    LaunchedEffect(apiKey) { saveApiKey(prefs, apiKey) }
+    LaunchedEffect(accessToken) { saveSecret(prefs, "http_token_enc", accessToken) }
 
     fun syncCurrent() {
         val s = sessions.first { it.id == currentId }
@@ -654,7 +678,7 @@ fun ChatScreen() {
 
     fun send() {
         if (busy || (prompt.isBlank() && attachments.isEmpty())) return
-        val h = host; val p = prompt; val pv = provider; val md = model; val key = apiKey
+        val h = host; val p = prompt; val token = accessToken
         val atts = attachments.toList()
         val trimmed = p.trim()
         if (trimmed.startsWith("/")) {
@@ -682,7 +706,7 @@ fun ChatScreen() {
         messages.add(Message("agent", ""))
         busy = true
         scope.launch {
-            askAgentStream(h, p, pv, md, key, atts, currentId) { chunk ->
+            askAgentStream(h, p, token, atts, currentId) { chunk ->
                 val cur = messages.getOrNull(agentIdx)?.text ?: ""
                 messages[agentIdx] = Message("agent", cur + chunk)
             }
@@ -707,7 +731,17 @@ fun ChatScreen() {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("ideal-agent") },
+                title = {
+                    Column {
+                        Text("ideal-agent", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        Text("локальный помощник", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface,
+                ),
                 actions = {
                     FilledIconButton(onClick = { sessionsMenu = true }) {
                         Icon(Icons.Filled.List, contentDescription = "Сессии")
@@ -762,9 +796,7 @@ fun ChatScreen() {
             ) {
                 SettingsPanel(
                     host = host, onHost = { host = it },
-                    provider = provider, onProvider = { provider = it },
-                    model = model, onModel = { model = it },
-                    apiKey = apiKey, onApiKey = { apiKey = it },
+                    accessToken = accessToken, onAccessToken = { accessToken = it },
                 )
             }
 
@@ -773,11 +805,19 @@ fun ChatScreen() {
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = "Отправьте сообщение агенту",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier.padding(24.dp),
+                    ) {
+                        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("С чего начнём?", style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold)
+                            Text("Опишите задачу, добавьте файл или приложите скриншот.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
             } else {
                 LazyColumn(
@@ -812,7 +852,7 @@ fun ChatScreen() {
 
             Surface(
                 tonalElevation = 3.dp,
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
@@ -950,8 +990,8 @@ fun MessageRow(msg: Message, onCopy: (String) -> Unit) {
     ) {
         Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
             Surface(
-                color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(16.dp),
+                color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                shape = if (isUser) RoundedCornerShape(20.dp, 6.dp, 20.dp, 20.dp) else RoundedCornerShape(6.dp, 20.dp, 20.dp, 20.dp),
                 modifier = Modifier
                     .widthIn(max = 340.dp)
                     .combinedClickable(
@@ -1133,14 +1173,9 @@ fun CodeCard(lang: String, code: String, onCopy: () -> Unit) {
 @Composable
 fun SettingsPanel(
     host: String, onHost: (String) -> Unit,
-    provider: String, onProvider: (String) -> Unit,
-    model: String, onModel: (String) -> Unit,
-    apiKey: String, onApiKey: (String) -> Unit,
+    accessToken: String, onAccessToken: (String) -> Unit,
 ) {
-    val ctx = LocalContext.current
-    val sel = PROVIDERS.firstOrNull { it.key == provider }
-    var expanded by remember { mutableStateOf(false) }
-    var showKey by remember { mutableStateOf(false) }
+    var showToken by remember { mutableStateOf(false) }
 
     OutlinedCard(
         modifier = Modifier
@@ -1149,135 +1184,40 @@ fun SettingsPanel(
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-            Text("Подключение", style = MaterialTheme.typography.titleMedium)
+            Text("Подключение к агенту", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
                 value = host, onValueChange = onHost,
                 label = { Text("Хост:порт агента") },
                 singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
             Text(
-                "Локальный адрес HTTP-канала, напр. 192.168.2.107:8080",
+                "Обычно 127.0.0.1:8080 для Termux на этом телефоне.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
 
-            androidx.compose.foundation.layout.Spacer(Modifier.size(12.dp))
-            Text("LLM провайдер", style = MaterialTheme.typography.titleMedium)
-
-            Box(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            ) {
-                OutlinedTextField(
-                    value = sel?.label ?: "— выбери провайдера —",
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Провайдер") },
-                    trailingIcon = {
-                        IconButton(onClick = { expanded = !expanded }) {
-                            Icon(
-                                if (expanded) Icons.Filled.ArrowDropUp else Icons.Filled.ArrowDropDown,
-                                contentDescription = "Выбрать провайдера",
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                DropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    PROVIDERS.forEach { p ->
-                        DropdownMenuItem(
-                            text = { Text(p.label) },
-                            onClick = {
-                                onProvider(p.key)
-                                if (model.isBlank() || sel == null) onModel(p.models.first())
-                                else if (!p.models.contains(model)) onModel(p.models.first())
-                                expanded = false
-                            },
-                        )
-                    }
-                }
-            }
-
             OutlinedTextField(
-                value = model, onValueChange = onModel,
-                label = { Text("Модель") },
+                value = accessToken, onValueChange = onAccessToken,
+                label = { Text("Токен HTTP-агента (шифруется)") },
                 singleLine = true,
-                placeholder = { Text(sel?.models?.first() ?: "напр. gpt-4o-mini") },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-
-            if (sel != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    sel.models.take(4).forEach { m ->
-                        AssistChip(
-                            onClick = { onModel(m) },
-                            label = { Text(m, style = MaterialTheme.typography.labelSmall) },
-                        )
-                    }
-                }
-            }
-
-            OutlinedTextField(
-                value = apiKey, onValueChange = onApiKey,
-                label = { Text("API-токен / ключ (шифруется)") },
-                singleLine = true,
-                enabled = sel?.needsKey != false,
-                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
-                    if (sel?.needsKey != false) {
-                        IconButton(onClick = { showKey = !showKey }) {
-                            Icon(
-                                if (showKey) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (showKey) "Скрыть" else "Показать",
-                            )
-                        }
+                    IconButton(onClick = { showToken = !showToken }) {
+                        Icon(if (showToken) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = if (showToken) "Скрыть" else "Показать")
                     }
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
-
-            if (sel?.signup != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { openUrl(ctx, sel.signup) }
-                        .padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Filled.Link,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        " Получить ключ / регистрация",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(start = 6.dp),
-                    )
-                }
-            }
-            if (sel?.needsKey == false) {
-                Text(
-                    "Ключ не требуется",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
+            Text("Провайдер и API-ключ задаются только в конфиге сервера. Это не передаёт ключ LLM по сети.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp))
         }
     }
 }
 
-suspend fun askAgent(host: String, prompt: String, provider: String, model: String, apiKey: String, attachments: List<Attachment> = emptyList(), sessionId: String = "default"): String {
+suspend fun askAgent(host: String, prompt: String, accessToken: String, attachments: List<Attachment> = emptyList(), sessionId: String = "default"): String {
     return withContext(Dispatchers.IO) {
         try {
             val url = URL("http://$host/message")
@@ -1285,14 +1225,12 @@ suspend fun askAgent(host: String, prompt: String, provider: String, model: Stri
             conn.requestMethod = "POST"
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
+            if (accessToken.isNotBlank()) conn.setRequestProperty("X-Ideal-Agent-Token", accessToken)
             conn.connectTimeout = 120_000
             conn.readTimeout = 120_000
             val obj = JSONObject()
             obj.put("text", prompt)
             obj.put("session_id", sessionId)
-            if (provider.isNotBlank()) obj.put("provider", provider)
-            if (model.isNotBlank()) obj.put("model", model)
-            if (apiKey.isNotBlank()) obj.put("api_key", apiKey)
             if (attachments.isNotEmpty()) {
                 val arr = org.json.JSONArray()
                 for (a in attachments) {
@@ -1319,7 +1257,7 @@ suspend fun askAgent(host: String, prompt: String, provider: String, model: Stri
 }
 
 suspend fun askAgentStream(
-    host: String, prompt: String, provider: String, model: String, apiKey: String,
+    host: String, prompt: String, accessToken: String,
     attachments: List<Attachment> = emptyList(),
     sessionId: String = "default",
     onChunk: (String) -> Unit,
@@ -1331,14 +1269,12 @@ suspend fun askAgentStream(
         conn.requestMethod = "POST"
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json")
+        if (accessToken.isNotBlank()) conn.setRequestProperty("X-Ideal-Agent-Token", accessToken)
         conn.connectTimeout = 120_000
         conn.readTimeout = 120_000
         val obj = JSONObject()
         obj.put("text", prompt)
         obj.put("session_id", sessionId)
-        if (provider.isNotBlank()) obj.put("provider", provider)
-        if (model.isNotBlank()) obj.put("model", model)
-        if (apiKey.isNotBlank()) obj.put("api_key", apiKey)
         if (attachments.isNotEmpty()) {
             val arr = org.json.JSONArray()
             for (a in attachments) {

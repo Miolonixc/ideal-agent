@@ -38,6 +38,7 @@ fun askAgent(prompt: String): String {
     conn.requestMethod = "POST"
     conn.doOutput = true
     conn.setRequestProperty("Content-Type", "application/json")
+    conn.setRequestProperty("X-Ideal-Agent-Token", token)
     conn.outputStream.write("""{"text":${ JSONObject.quote(prompt) }}""".toByteArray())
     val reply = conn.inputStream.bufferedReader().readText()
     val json = JSONObject(reply)
@@ -60,8 +61,11 @@ HTTP-канал принимает `POST /webhook/github` — подключи �
 issue-комментарий через навык `github`).
 
 ## Безопасность
-- HTTP-канал слушает `127.0.0.1` по умолчанию — не выставляй на `0.0.0.0` без
-  обратного прокси и токена.
+- HTTP-канал слушает `127.0.0.1` по умолчанию. Для внешнего доступа задай
+  `http.token` (или `IDEAL_HTTP_TOKEN`) и передавай его в заголовке
+  `X-Ideal-Agent-Token`.
+- LLM API-ключ остаётся в конфигурации сервера и не должен передаваться из
+  мобильного клиента.
 - Для доступа снаружи используй Telegram-канал (уже с `allowed`-белым списком)
   или положи HTTP за nginx + basic-auth / mTLS.
 - Ключи (LLM, GitHub, Telegram) хранятся в `config.json`/`~/.config/ideal-agent`.

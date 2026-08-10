@@ -122,6 +122,7 @@ class TestTools(unittest.TestCase):
         self.assertIn("записано", reg.call("write_file", json.dumps({"path": p, "content": "x"})))
         self.assertIn("x", reg.call("read_file", json.dumps({"path": p})))
         self.assertIn("запрещена", reg.call("read_file", json.dumps({"path": "/etc/passwd"})))
+        self.assertIn("запрещена", reg.call("grep", json.dumps({"pattern": ".", "path": "/etc"})))
 
 
 class TestSafety(unittest.TestCase):

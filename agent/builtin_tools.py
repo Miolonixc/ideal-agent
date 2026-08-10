@@ -83,7 +83,9 @@ def register_builtin_tools(registry, cfg):
     def grep_files(args):
         pat = args.get("pattern", "")
         path = args.get("path", roots[0])
-        rp = _check(path, roots) or os.path.realpath(os.path.expanduser(path))
+        rp = _check(path, roots)
+        if not rp:
+            return "ошибка: " + ALLOWED_NOTE
         if not os.path.isdir(rp):
             return "ошибка: path не каталог"
         rx = re.compile(pat)
@@ -109,7 +111,7 @@ def register_builtin_tools(registry, cfg):
 
     def shell(args):
         cmd = args.get("command", "")
-        return safety.run_sandboxed(cmd, timeout=int(args.get("timeout", 30)))
+        return safety.run_sandboxed(cmd, timeout=int(args.get("timeout", 30)), cwd=roots[0])
 
     registry.register(
         "read_file",

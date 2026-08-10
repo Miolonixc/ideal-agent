@@ -4,6 +4,7 @@ import json
 import threading
 import unittest
 import urllib.request
+import urllib.error
 
 sys.path.insert(0, ".")
 
@@ -88,22 +89,30 @@ class TestHTTPChannel(unittest.TestCase):
         srv.bind(("127.0.0.1", 0))
         port = srv.getsockname()[1]
         srv.close()
-        ch = HTTPChannel(host="127.0.0.1", port=port)
+        ch = HTTPChannel(host="127.0.0.1", port=port, token="test-token")
         threading.Thread(target=ch.run, args=(a,), daemon=True).start()
         base = f"http://127.0.0.1:{port}"
         # ждём готовности сервера
         for _ in range(50):
             try:
-                urllib.request.urlopen(base + "/", timeout=1)
+                urllib.request.urlopen(urllib.request.Request(
+                    base + "/", headers={"X-Ideal-Agent-Token": "test-token"}
+                ), timeout=1)
                 break
             except Exception:
                 time.sleep(0.1)
-        status = json.loads(urllib.request.urlopen(base + "/", timeout=5).read())
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            urllib.request.urlopen(base + "/", timeout=5)
+        self.assertEqual(denied.exception.code, 401)
+        denied.exception.close()
+        status = json.loads(urllib.request.urlopen(urllib.request.Request(
+            base + "/", headers={"X-Ideal-Agent-Token": "test-token"}
+        ), timeout=5).read())
         self.assertTrue(status["ok"])
         req = urllib.request.Request(
             base + "/message",
             data=json.dumps({"text": "привет"}).encode(),
-            headers={"Content-Type": "application/json"}, method="POST",
+            headers={"Content-Type": "application/json", "X-Ideal-Agent-Token": "test-token"}, method="POST",
         )
         res = json.loads(urllib.request.urlopen(req, timeout=10).read())
         self.assertEqual(res["reply"], "ok")

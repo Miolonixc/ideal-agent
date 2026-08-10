@@ -17,6 +17,11 @@
     "GITHUB_TOKEN=... python3 mcp_servers/github_mcp.py"
   ],
   "use_context": true,
+  "http": {
+    "host": "127.0.0.1",
+    "token": "change-this-to-a-long-random-token",
+    "github_webhook_secret": ""
+  },
   "telegram": {
     "token": "",
     "allowed": [77002359]

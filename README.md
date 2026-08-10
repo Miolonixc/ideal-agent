@@ -64,6 +64,9 @@ python3 main.py "твоя задача"
 | `mcp_servers` | `[]` | Список `["cmd args", ...]` MCP-серверов |
 | `embeddings` | — | `{"provider":"hash"}` или `{"provider":"remote",...}` |
 | `use_context` | `true` | Авто-извлечение контекста в промпт |
+| `http.host` | `127.0.0.1` | Адрес HTTP-канала; внешний адрес требует `http.token` |
+| `http.token` | — | Токен для HTTP-клиентов (`X-Ideal-Agent-Token`) |
+| `http.github_webhook_secret` | — | Secret для проверки `X-Hub-Signature-256` GitHub webhook |
 | `telegram.token` | — | Токен Telegram-бота (альтернатива env `TELEGRAM_BOT_TOKEN`) |
 | `telegram.allowed` | `[]` | Список разрешённых chat_id |
 
@@ -125,9 +128,14 @@ IDEAL_LLM_API_KEY=sk-... bash install.sh --service   # + автозапуск
 
 ## Безопасность и sandbox
 
-`shell`-тул изолируется при `IDEAL_SANDBOX=1`: предпочтительно `bwrap`
-(readonly root, `--unshare-net`), иначе `unshare -r`, иначе честный запуск.
-Всегда работают deny-правила апрув-гейта (например `"shell:rm -rf"`).
+`shell`-тул изолируется по умолчанию: предпочтительно `bwrap` (root readonly,
+workspace доступен на запись, сеть отключена), иначе `unshare`. Если sandbox
+недоступен, shell отклоняется. Запуск без изоляции возможен только явным
+`IDEAL_SANDBOX=0 IDEAL_ALLOW_UNSANDBOXED_SHELL=1` в доверенной локальной среде.
+HTTP по умолчанию слушает только `127.0.0.1`; для внешнего интерфейса задай
+`http.token` или `IDEAL_HTTP_TOKEN`. LLM-провайдер и его ключ настраиваются на
+сервере и не принимаются из HTTP-запросов. Всегда работают deny-правила
+апрув-гейта (например `"shell:rm -rf"`).
 
 ## Эмбеддинги (опц.)
 
@@ -229,4 +237,3 @@ benchmarks/ — смоук-бенчмарк
   поставь `bwrap` (bubblewrap) для изоляции.
 - **Контекст не подтягивается** — проверь `use_context: true` и что `workspace`
   указывает на нужную папку; индекс строится лениво при первом `run`.
-

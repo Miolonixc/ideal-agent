@@ -32,7 +32,7 @@ class TestContext(unittest.TestCase):
         msgs = captured["messages"]
         self.assertEqual(msgs[0]["role"], "system")
         self.assertIn("unique_function_xyz", msgs[0]["content"])
-        self.assertIn("[file", msgs[0]["content"])
+        self.assertIn("[файл", msgs[0]["content"])
 
     def test_no_context_when_disabled(self):
         tmp = tempfile.mkdtemp()
@@ -55,8 +55,8 @@ class TestContext(unittest.TestCase):
         agent.run("привет")
         systems = [m for m in captured["messages"] if m.get("role") == "system"]
         joined = " ".join(m["content"] for m in systems)
-        self.assertNotIn("[file", joined)
-        self.assertNotIn("[memory]", joined)
+        self.assertNotIn("[файл", joined)
+        self.assertNotIn("[память]", joined)
 
 
 if __name__ == "__main__":

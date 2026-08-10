@@ -1,9 +1,12 @@
 from __future__ import annotations
 import base64
+import hashlib
+import hmac
 import json
 import os
 import sys
 import tempfile
+import shutil
 import time
 import urllib.parse
 import urllib.request
@@ -343,9 +346,16 @@ class HTTPChannel(Channel):
       POST /webhook/github -> GitHub-событие (push/issue) проксируется агенту
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8080):
+    MAX_BODY_BYTES = 12 * 1024 * 1024
+    MAX_ATTACHMENTS = 5
+    MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 8080,
+                 token: str = "", github_webhook_secret: str = ""):
         self.host = host
         self.port = port
+        self.token = token
+        self.github_webhook_secret = github_webhook_secret
         self._agent = None
 
     def read(self) -> Optional[Message]:
@@ -361,7 +371,9 @@ class HTTPChannel(Channel):
         Формат элемента: {"name": str, "mime": str, "data": <base64 str>}."""
         atts = data.get("attachments") or []
         if not atts:
-            return None
+            return None, None
+        if not isinstance(atts, list) or len(atts) > HTTPChannel.MAX_ATTACHMENTS:
+            return None, None
         out = []
         d = tempfile.mkdtemp(prefix="ideal-att-")
         for i, a in enumerate(atts):
@@ -371,8 +383,10 @@ class HTTPChannel(Channel):
             if not raw:
                 continue
             try:
-                blob = base64.b64decode(raw)
+                blob = base64.b64decode(raw, validate=True)
             except Exception:
+                continue
+            if len(blob) > HTTPChannel.MAX_ATTACHMENT_BYTES:
                 continue
             name = (a.get("name") or f"file{i}").replace("/", "_")
             mime = a.get("mime") or "application/octet-stream"
@@ -393,7 +407,15 @@ class HTTPChannel(Channel):
             else:
                 kind = "binary"
             out.append({"kind": kind, "name": name, "mime": mime, "path": path})
-        return out or None
+        if not out:
+            shutil.rmtree(d, ignore_errors=True)
+            return None, None
+        return out, d
+
+    @staticmethod
+    def _cleanup_attachments(directory):
+        if directory:
+            shutil.rmtree(directory, ignore_errors=True)
 
     def run(self, agent):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -413,7 +435,31 @@ class HTTPChannel(Channel):
             def log_message(self, *a):
                 pass
 
+            def _authorized(self):
+                # A token is mandatory on any non-loopback listener.  Loopback
+                # remains convenient for the Termux companion, but may opt in
+                # to the same token with IDEAL_HTTP_TOKEN.
+                if not bot.token:
+                    return self.client_address[0] in ("127.0.0.1", "::1")
+                supplied = self.headers.get("X-Ideal-Agent-Token", "")
+                return hmac.compare_digest(supplied, bot.token)
+
+            def _forbidden(self):
+                self._send(401, {"ok": False, "error": "unauthorized"})
+
+            def _valid_github_signature(self, raw):
+                if not bot.github_webhook_secret:
+                    return False
+                header = self.headers.get("X-Hub-Signature-256", "")
+                expected = "sha256=" + hmac.new(
+                    bot.github_webhook_secret.encode(), raw, hashlib.sha256
+                ).hexdigest()
+                return hmac.compare_digest(header, expected)
+
             def do_GET(self):
+                if not self._authorized():
+                    self._forbidden()
+                    return
                 if self.path in ("/", "/status"):
                     self._send(200, {
                         "ok": True,
@@ -428,69 +474,65 @@ class HTTPChannel(Channel):
             def do_POST(self):
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
+                    if length < 0 or length > HTTPChannel.MAX_BODY_BYTES:
+                        self._send(413, {"ok": False, "error": "request too large"})
+                        return
                     raw = self.rfile.read(length) if length else b"{}"
                     data = json.loads(raw.decode() or "{}")
+                    if not isinstance(data, dict):
+                        data = {}
                 except Exception:
                     data = {}
-                # переопределение провайдера/модели/ключа на лету (из компаньона)
-                override = None
-                if data.get("provider") or data.get("api_key") or data.get("model"):
-                    try:
-                        from agent import llm as _llm
-                        override = _llm.build_provider(
-                            name=data.get("provider") or "openai-compatible",
-                            api_key=data.get("api_key"),
-                            model=data.get("model"),
-                            base_url=data.get("base_url"),
-                        )
-                    except Exception:
-                        override = None
+                if not self._authorized():
+                    self._forbidden()
+                    return
                 if self.path == "/message":
                     text = (data.get("text") or "").strip()
-                    attachments = HTTPChannel._prepare_attachments(data)
-                    bot._agent._session_id = data.get("session_id") or "default"
+                    attachments, attachment_dir = HTTPChannel._prepare_attachments(data)
+                    session_id = data.get("session_id") or "default"
                     if not text and not attachments:
+                        HTTPChannel._cleanup_attachments(attachment_dir)
                         self._send(400, {"ok": False, "error": "empty text"})
                         return
-                    cmd = bot._agent.command(text) if text else None
+                    cmd = bot._agent.command_in_session(session_id, text) if text else None
                     if cmd == "__EXIT__":
+                        HTTPChannel._cleanup_attachments(attachment_dir)
                         self._send(200, {"ok": True, "reply": "bye"})
                         return
                     if cmd is not None:
+                        HTTPChannel._cleanup_attachments(attachment_dir)
                         self._send(200, {"ok": True, "reply": cmd, "chat_id": "http"})
                         return
                     try:
-                        if override:
-                            saved = bot._agent.provider
-                            bot._agent.provider = override
-                            try:
-                                reply = bot._agent.run(text, attachments=attachments)
-                            finally:
-                                bot._agent.provider = saved
-                        else:
-                            reply = bot._agent.run(text, attachments=attachments)
+                        reply = bot._agent.run_in_session(session_id, text, attachments=attachments)
                     except Exception as e:
                         reply = f"[ошибка агента] {e}"
+                    finally:
+                        HTTPChannel._cleanup_attachments(attachment_dir)
                     self._send(200, {"ok": True, "reply": reply, "chat_id": "http"})
                 elif self.path == "/webhook/github":
+                    if not self._valid_github_signature(raw):
+                        self._send(401, {"ok": False, "error": "invalid github signature"})
+                        return
                     event = self.headers.get("X-GitHub-Event", "ping")
                     if event == "ping":
                         self._send(200, {"ok": True})
                         return
                     text = bot._format_github(event, data)
                     try:
-                        bot._agent.run(text)
+                        bot._agent.run_in_session("github-webhook", text)
                     except Exception as e:
                         print("ошибка агента (github webhook):", e)
                     self._send(200, {"ok": True})
                 elif self.path == "/message/stream":
                     text = (data.get("text") or "").strip()
-                    attachments = HTTPChannel._prepare_attachments(data)
-                    bot._agent._session_id = data.get("session_id") or "default"
+                    attachments, attachment_dir = HTTPChannel._prepare_attachments(data)
+                    session_id = data.get("session_id") or "default"
                     if not text and not attachments:
+                        HTTPChannel._cleanup_attachments(attachment_dir)
                         self._send(400, {"ok": False, "error": "empty text"})
                         return
-                    cmd = bot._agent.command(text) if text else None
+                    cmd = bot._agent.command_in_session(session_id, text) if text else None
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                     self.send_header("Cache-Control", "no-cache")
@@ -502,19 +544,16 @@ class HTTPChannel(Channel):
                         elif cmd is not None:
                             self.wfile.write(b"data: " + json.dumps({"chunk": cmd}).encode() + b"\n\n")
                         else:
-                            saved = None
-                            if override:
-                                saved = bot._agent.provider
-                                bot._agent.provider = override
                             try:
-                                for chunk in bot._agent.stream(text, attachments=attachments):
+                                for chunk in bot._agent.stream_in_session(session_id, text, attachments=attachments):
                                     self.wfile.write(b"data: " + json.dumps({"chunk": chunk}, ensure_ascii=False).encode() + b"\n\n")
                                     self.wfile.flush()
                             finally:
-                                if saved is not None:
-                                    bot._agent.provider = saved
+                                HTTPChannel._cleanup_attachments(attachment_dir)
                     except Exception as e:
                         self.wfile.write(b"data: " + json.dumps({"chunk": f"[ошибка] {e}"}).encode() + b"\n\n")
+                    finally:
+                        HTTPChannel._cleanup_attachments(attachment_dir)
                     self.wfile.write(b"data: [DONE]\n\n")
                     self.wfile.flush()
                 else:

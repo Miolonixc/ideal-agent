@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sqlite3
 import subprocess
 import time
@@ -59,11 +60,20 @@ class ApprovalGate:
         return "ask", None
 
 
-def run_sandboxed(command: str, timeout: int = 30) -> str:
-    wrapped = _sandbox_command(command) if os.environ.get("IDEAL_SANDBOX") else command
+def run_sandboxed(command: str, timeout: int = 30, cwd: Optional[str] = None) -> str:
+    """Run a command only in an available OS sandbox.
+
+    Set IDEAL_ALLOW_UNSANDBOXED_SHELL=1 only for trusted local development.
+    """
+    sandboxed = os.environ.get("IDEAL_SANDBOX", "1") != "0"
+    if sandboxed and not (_has_bwrap() or _has_unshare()):
+        return "ошибка: sandbox shell недоступен; установи bwrap или явно задай IDEAL_ALLOW_UNSANDBOXED_SHELL=1"
+    if not sandboxed and os.environ.get("IDEAL_ALLOW_UNSANDBOXED_SHELL") != "1":
+        return "ошибка: запуск без sandbox запрещён; задай IDEAL_ALLOW_UNSANDBOXED_SHELL=1 только в доверенной среде"
+    wrapped = _sandbox_command(command, cwd) if sandboxed else command
     try:
         r = subprocess.run(
-            wrapped, shell=True, capture_output=True, text=True, timeout=timeout
+            wrapped, shell=True, capture_output=True, text=True, timeout=timeout, cwd=cwd
         )
     except subprocess.TimeoutExpired:
         return "ошибка: таймаут"
@@ -73,14 +83,16 @@ def run_sandboxed(command: str, timeout: int = 30) -> str:
     return out[:8000] or "(пусто)"
 
 
-def _sandbox_command(command: str) -> str:
+def _sandbox_command(command: str, cwd: Optional[str] = None) -> str:
     if _has_bwrap():
+        work = os.path.realpath(cwd) if cwd else "/tmp"
         return (
-            "bwrap --ro-bind / / --dev /dev --tmpfs /tmp "
-            "--unshare-net " + command
+            "bwrap --ro-bind / / --bind " + work + " " + work +
+            " --chdir " + work + " --dev /dev --tmpfs /tmp --unshare-net --die-with-parent -- /bin/sh -c " +
+            shlex.quote(command)
         )
     if _has_unshare():
-        return f"unshare -r {command}"
+        return "unshare -r --net -- /bin/sh -c " + shlex.quote(command)
     return command
 
 
