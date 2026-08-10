@@ -28,6 +28,9 @@ class AgentConfig:
     context_budget: int = 6000
     skills_dir: Optional[str] = None
     mcp_servers: list = field(default_factory=list)
+    # External programs are disabled until the user names them explicitly.
+    # Entries: skill:<name>, mcp:<server-file-or-command>, or skill:*/mcp:*.
+    trusted_extensions: list = field(default_factory=list)
     embeddings: Optional[dict] = None
     use_context: bool = True
     telegram: Optional[dict] = None
@@ -83,7 +86,7 @@ def save_runtime_settings(cfg, path=None):
     llm = data.setdefault("llm", {})
     for key in ("provider", "base_url", "model", "temperature", "timeout", "max_tokens", "retries"):
         llm[key] = getattr(cfg.llm, key)
-    for key in ("mode", "workspace", "sandbox_mode", "context_budget", "skills_dir", "use_context"):
+    for key in ("mode", "workspace", "sandbox_mode", "context_budget", "skills_dir", "use_context", "trusted_extensions"):
         data[key] = getattr(cfg, key)
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)

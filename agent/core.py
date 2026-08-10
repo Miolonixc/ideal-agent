@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import threading
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import llm as llm_mod
@@ -17,6 +18,10 @@ from .tools import ToolRegistry
 MAX_ITER = 12
 MAX_INLINE_ATTACHMENT_BYTES = 512 * 1024
 MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
+
+def _safe_tool_part(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", value).strip("_") or "extension"
 
 
 def _content_to_text(content):
@@ -121,11 +126,26 @@ class Agent:
 
     def load_skills_dir(self, skills_dir):
         from .skills import load_skills
-        self._loaded_skills = load_skills(self.registry, skills_dir)
+        self._loaded_skills = load_skills(
+            self.registry, skills_dir,
+            trusted_extensions=getattr(self.cfg, "trusted_extensions", []),
+        )
         return self._loaded_skills
 
     def connect_mcp(self, command, args=None):
         from .mcp import MCPClient
+        server_name = Path(command).name
+        if args:
+            for arg in args:
+                if str(arg).endswith((".py", ".sh", ".js", ".mjs")):
+                    server_name = Path(arg).name
+                    break
+        allowed = set(getattr(self.cfg, "trusted_extensions", []) or [])
+        if "mcp:*" not in allowed and f"mcp:{server_name}" not in allowed:
+            raise PermissionError(
+                f"MCP '{server_name}' не отмечен доверенным; добавь 'mcp:{server_name}' "
+                "в trusted_extensions конфига."
+            )
         client = MCPClient(command, args)
         client.initialize()
         tools = client.list_tools()
@@ -148,9 +168,14 @@ class Agent:
                     return text[:4000]
                 return handler
 
-            self.registry.register(name, t.get("description", ""), schema, make_handler(client, name))
+            exposed_name = "mcp_" + _safe_tool_part(server_name) + "_" + _safe_tool_part(name)
+            self.registry.register(
+                exposed_name, t.get("description", ""), schema,
+                make_handler(client, name), source="mcp",
+            )
         self._mcp_clients.append(client)
-        return [t["name"] for t in tools]
+        return ["mcp_" + _safe_tool_part(server_name) + "_" + _safe_tool_part(t["name"])
+                for t in tools]
 
     def close(self):
         if self._closed:

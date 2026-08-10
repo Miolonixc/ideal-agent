@@ -183,6 +183,9 @@ HTTP по умолчанию слушает только `127.0.0.1`; для в�
 
 Положи навыки в `skills/<name>/`: `SKILL.md` (frontmatter `name`/`description`) + `run.sh`/`run.py`.
 Скрипт получает JSON аргументов на stdin и пишет результат в stdout.
+Исполняемые skills выключены до явного доверия: добавь в конфиг
+`"trusted_extensions": ["skill:<name>"]` (или `"skill:*"`). В модели они
+появляются как `skill_<name>`, поэтому не могут подменить встроенный tool.
 
 ```
 SKILLS_DIR=skills python3 main.py "запусти тесты"
@@ -190,7 +193,21 @@ SKILLS_DIR=skills python3 main.py "запусти тесты"
 
 ## MCP
 
-Запусти stdio-MCP-сервер и укажи его в `mcp_servers` (или `MCP_SERVERS="cmd args|..."`):
+Запусти stdio-MCP-сервер и укажи его в `mcp_servers` (или `MCP_SERVERS="cmd args|..."`).
+MCP — это сторонний процесс, поэтому перед первым запуском явно доверь его:
+
+```json
+{
+  "mcp_servers": ["python3 mcp_servers/fs_mcp.py"],
+  "trusted_extensions": ["mcp:fs_mcp.py"]
+}
+```
+
+Можно доверить все MCP через `"mcp:*"`, но это уместно только для контролируемой
+установки. Их tools получают namespace `mcp_<server>_<tool>` и не могут заменить
+встроенные инструменты.
+
+После этого:
 
 ```
 python3 main.py "прочитай файл через mcp"

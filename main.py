@@ -66,8 +66,11 @@ def main():
         if not spec:
             continue
         parts = spec.split()
-        agent.connect_mcp(parts[0], parts[1:])
-        print("mcp:", parts[0])
+        try:
+            agent.connect_mcp(parts[0], parts[1:])
+            print("mcp:", parts[0])
+        except (PermissionError, ValueError) as e:
+            print("mcp пропущен:", e)
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN") or (getattr(cfg, "telegram", None) or {}).get("token")
 

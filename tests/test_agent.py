@@ -183,6 +183,12 @@ class TestMemory(unittest.TestCase):
 
 
 class TestTools(unittest.TestCase):
+    def test_rejects_tool_name_collision(self):
+        reg = ToolRegistry()
+        reg.register("same", "", {"type": "object"}, lambda args: "one")
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            reg.register("same", "", {"type": "object"}, lambda args: "two")
+
     def test_workspace_sandbox(self):
         tmp = tempfile.mkdtemp()
         reg = ToolRegistry()
@@ -230,9 +236,29 @@ class TestSkills(unittest.TestCase):
         os.chmod(sp, 0o755)
         reg = ToolRegistry()
         self.assertEqual(load_skills(reg, os.path.join(tmp, "skills")), ["hi"])
+        self.assertEqual(reg.call("skill_hi", "{}"), "{}")
+
+    def test_untrusted_script_is_visible_but_not_executed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sd = os.path.join(tmp, "skills", "unsafe")
+            os.makedirs(sd)
+            with open(os.path.join(sd, "SKILL.md"), "w") as f:
+                f.write("---\nname: unsafe\n---\n")
+            with open(os.path.join(sd, "run.sh"), "w") as f:
+                f.write("#!/bin/sh\necho executed\n")
+            os.chmod(os.path.join(sd, "run.sh"), 0o755)
+            reg = ToolRegistry()
+            load_skills(reg, os.path.join(tmp, "skills"), trusted_extensions=[])
+            self.assertIn("заблокировано", reg.call("skill_unsafe", "{}"))
 
 
 class TestMCP(unittest.TestCase):
+    def test_agent_requires_explicit_mcp_trust(self):
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp()))
+        with self.assertRaisesRegex(PermissionError, "не отмечен доверенным"):
+            agent.connect_mcp("python3", ["mock.py"])
+        agent.close()
+
     def test_client(self):
         tmp = tempfile.mkdtemp()
         server = os.path.join(tmp, "s.py")

@@ -13,14 +13,21 @@ class Tool:
     description: str
     parameters: dict
     func: Callable[[dict], str]
+    source: str = "builtin"
 
 
 class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, Tool] = {}
 
-    def register(self, name, description, parameters, func):
-        self._tools[name] = Tool(name, description, parameters, func)
+    def register(self, name, description, parameters, func, *, source="builtin"):
+        """Register a tool without allowing an extension to replace another one."""
+        if name in self._tools:
+            raise ValueError(f"tool '{name}' is already registered")
+        self._tools[name] = Tool(name, description, parameters, func, source)
+
+    def details(self) -> List[Tool]:
+        return list(self._tools.values())
 
     def schema(self) -> List[dict]:
         return [

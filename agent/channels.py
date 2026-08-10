@@ -394,8 +394,11 @@ class TUIChannel(Channel):
                 view.append((f"Конфиг: {getattr(agent.cfg, '_config_path', '~/.config/ideal-agent/config.json')}", c(3)))
             elif screen == "modules":
                 clients = getattr(agent, "_mcp_clients", [])
+                extension_tools = [f"{t.name} ({t.source})" for t in agent.registry.details()
+                                   if t.source != "builtin"]
                 view = [("Подключённые модули (F3/Esc назад)", c(1)),
                         (f"Tools: {', '.join(sorted(agent.registry._tools)) or 'нет'}", c(5)),
+                        (f"Extensions: {', '.join(extension_tools) or 'нет'}", c(5)),
                         (f"Skills: {', '.join(getattr(agent, '_loaded_skills', [])) or 'нет'}", c(5)),
                         (f"MCP: {len(clients)} подключено", c(3))]
                 for client in clients:

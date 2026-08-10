@@ -141,10 +141,8 @@ config = {
     "workspace": os.path.join(os.environ["HOME_PATH"], "dev"),
     "sandbox_mode": "required",
     "skills_dir": os.path.join(os.environ["DEST_PATH"], "skills"),
-    "mcp_servers": [
-        f"python3 {os.path.join(os.environ['DEST_PATH'], 'mcp_servers', 'fs_mcp.py')}",
-        f"python3 {os.path.join(os.environ['DEST_PATH'], 'mcp_servers', 'fetch_mcp.py')}",
-    ],
+    "mcp_servers": [],
+    "trusted_extensions": [],
     "use_context": True,
     "http": {"host": "127.0.0.1", "token": os.environ["HTTP_TOKEN"], "github_webhook_secret": ""},
     "telegram": {"token": "", "allowed": []},

@@ -13,11 +13,8 @@
   "workspace": "~/dev",
   "sandbox_mode": "required",
   "skills_dir": "skills",
-  "mcp_servers": [
-    "python3 mcp_servers/fs_mcp.py",
-    "python3 mcp_servers/fetch_mcp.py",
-    "GITHUB_TOKEN=... python3 mcp_servers/github_mcp.py"
-  ],
+  "mcp_servers": [],
+  "trusted_extensions": [],
   "use_context": true,
   "http": {
     "host": "127.0.0.1",

@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import re
 from typing import List, Optional
 
 
@@ -29,7 +30,13 @@ def _find_script(skill_dir: str) -> Optional[str]:
     return None
 
 
-def load_skills(registry, skills_dir: str) -> List[str]:
+def tool_name(name: str) -> str:
+    """Names exposed to providers are stable and cannot shadow built-ins."""
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_") or "extension"
+    return "skill_" + safe_name
+
+
+def load_skills(registry, skills_dir: str, trusted_extensions=None) -> List[str]:
     if not os.path.isdir(skills_dir):
         return []
     loaded = []
@@ -42,9 +49,13 @@ def load_skills(registry, skills_dir: str) -> List[str]:
         sname = meta.get("name", name)
         sdesc = meta.get("description", desc) or name
         script = _find_script(skill_dir)
+        trusted = trusted_extensions is None or _is_trusted(trusted_extensions, "skill", sname)
 
-        def make_handler(script, skill_dir, desc):
+        def make_handler(script, skill_dir, desc, trusted, sname):
             def handler(args):
+                if script and not trusted:
+                    return (f"заблокировано: skill '{sname}' не отмечен доверенным. "
+                            f"Добавь 'skill:{sname}' в trusted_extensions конфига.")
                 if script:
                     try:
                         env = dict(os.environ)
@@ -60,11 +71,17 @@ def load_skills(registry, skills_dir: str) -> List[str]:
             return handler
 
         registry.register(
-            sname,
+            tool_name(sname),
             sdesc,
             {"type": "object", "properties": {"input": {"type": "string"}},
              "required": []},
-            make_handler(script, skill_dir, desc),
+            make_handler(script, skill_dir, desc, trusted, sname),
+            source="skill",
         )
         loaded.append(sname)
     return loaded
+
+
+def _is_trusted(allowed, kind: str, name: str) -> bool:
+    allowed = set(allowed or [])
+    return f"{kind}:*" in allowed or f"{kind}:{name}" in allowed
