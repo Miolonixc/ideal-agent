@@ -18,7 +18,7 @@ lan_ip(){
     hostname -I 2>/dev/null | awk '{print $1}'
     return 0
 }
-APK_URL="${IDEAL_APK_URL:-https://github.com/Miolonixc/ideal-agent/releases/download/v0.2.3/ideal-agent-debug.apk}"
+APK_URL="${IDEAL_APK_URL:-https://github.com/Miolonixc/ideal-agent/releases/download/v0.2.4/ideal-agent-debug.apk}"
 offer_apk(){
     [ "${DOWNLOAD_APK:-0}" = "1" ] || { [ "$PLATFORM" = "termux" ] && interactive; } || return 0
     [ "${DOWNLOAD_APK:-0}" = "1" ] || yesno "Скачать APK компаньона в Загрузки?" "n" || return 0
