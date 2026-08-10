@@ -73,7 +73,10 @@ def main():
 
     if sub == "tui":
         from agent.channels import TUIChannel
-        TUIChannel().run_session(agent)
+        try:
+            TUIChannel().run_session(agent)
+        finally:
+            agent.close()
         return
 
     if sub == "ide":

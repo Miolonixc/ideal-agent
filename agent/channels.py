@@ -3,7 +3,9 @@ import base64
 import hashlib
 import hmac
 import json
+import mimetypes
 import os
+import subprocess
 import sys
 import tempfile
 import shutil
@@ -22,6 +24,52 @@ class Message:
     text: str
     chat_id: Optional[str] = None
     chat_type: Optional[str] = None
+
+
+TUI_MAX_ATTACHMENTS = 5
+TUI_MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
+
+def terminal_attachment(path: str):
+    """Подготавливает локальный файл для TUI без чтения содержимого в память."""
+    expanded = os.path.abspath(os.path.expanduser(path.strip()))
+    if not os.path.isfile(expanded):
+        raise ValueError("файл не найден или это не обычный файл")
+    if os.path.getsize(expanded) > TUI_MAX_ATTACHMENT_BYTES:
+        raise ValueError("файл больше 8 MiB")
+    mime = mimetypes.guess_type(expanded)[0] or "application/octet-stream"
+    text_ext = {".txt", ".md", ".py", ".js", ".ts", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".html", ".css", ".sh", ".java", ".kt", ".c", ".h", ".cpp", ".go", ".rs", ".sql"}
+    ext = os.path.splitext(expanded)[1].lower()
+    kind = "image" if mime.startswith("image/") else "text" if mime.startswith("text/") or ext in text_ext else "file"
+    return {"path": expanded, "name": os.path.basename(expanded), "mime": mime, "kind": kind}
+
+
+def capture_terminal_screenshot():
+    """Создаёт скриншот штатной утилитой ОС и возвращает attachment."""
+    fd, path = tempfile.mkstemp(prefix="ideal-agent-shot-", suffix=".png")
+    os.close(fd)
+    if os.environ.get("TERMUX_VERSION"):
+        command = ["termux-screenshot", "-p", path]
+    elif sys.platform == "darwin":
+        command = ["screencapture", "-x", path]
+    elif shutil.which("gnome-screenshot"):
+        command = ["gnome-screenshot", "-f", path]
+    elif shutil.which("scrot"):
+        command = ["scrot", path]
+    else:
+        os.unlink(path)
+        raise RuntimeError("скриншоты не поддерживаются: нужен termux-screenshot, screencapture, gnome-screenshot или scrot")
+    try:
+        subprocess.run(command, check=True, timeout=20, capture_output=True)
+        att = terminal_attachment(path)
+        att["temporary"] = True
+        return att
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
 
 
 class Channel:
@@ -182,6 +230,7 @@ class TUIChannel(Channel):
         history: List[str] = []
         hist_idx = 0
         buf = ""
+        attachments = []
         screen = "chat"
         settings_idx = 0
         view_offset = 0
@@ -281,7 +330,11 @@ class TUIChannel(Channel):
             inp.erase()
             inp.box()
             try:
-                inp.addstr(0, 2, " ввод · F2 настройки · F3 модули · Ctrl+D выход ", c(5) | curses.A_BOLD)
+                attachment_label = ", ".join(a["name"] for a in attachments)
+                title = " ввод · F2 настройки · F3 модули · Ctrl+D выход "
+                if attachment_label:
+                    title = f" 📎 {attachment_label} "
+                inp.addstr(0, 2, title[: max(1, w - 4)], c(5) | curses.A_BOLD)
             except curses.ошибка:
                 pass
             for row, part in enumerate(textwrap.wrap("> " + buf, max(1, w - 2),
@@ -289,6 +342,25 @@ class TUIChannel(Channel):
                 try: inp.addstr(1 + row, 1, part[: w - 2], c(2))
                 except curses.ошибка: pass
             inp.noutrefresh()
+
+        def add_attachment(path):
+            if len(attachments) >= TUI_MAX_ATTACHMENTS:
+                self.lines.append(f"system> Можно прикрепить не более {TUI_MAX_ATTACHMENTS} файлов")
+                return
+            try:
+                attachment = terminal_attachment(path)
+                attachments.append(attachment)
+                self.lines.append(f"system> Прикреплён {attachment['kind']}: {attachment['name']}")
+            except Exception as exc:
+                self.lines.append(f"system> Не удалось прикрепить файл: {exc}")
+
+        def clear_attachments(items):
+            for attachment in items:
+                if attachment.get("temporary"):
+                    try:
+                        os.unlink(attachment["path"])
+                    except OSError:
+                        pass
 
         def draw_header():
             stdscr.erase()
@@ -385,7 +457,7 @@ class TUIChannel(Channel):
                     self.lines.append("system> " + save_settings()); refresh(); continue
                 continue
             if code == getattr(curses, "KEY_F1", -999) or (char and char == "?"):
-                self.lines.append("system> /settings, /modules, /about; F2 настройки, F3 модули")
+                self.lines.append("system> /attach ПУТЬ · /files · /detach N · /screenshot · /settings · /modules · /about")
                 refresh(); continue
             if code == getattr(curses, "KEY_PPAGE", -999):
                 view_offset = min(len(wrapped_lines()), view_offset + max(1, h - 6)); refresh(); continue
@@ -413,6 +485,33 @@ class TUIChannel(Channel):
                 view_offset = 0
                 if text in ("/exit", "/quit"):
                     break
+                if text.startswith("/attach "):
+                    add_attachment(text.split(None, 1)[1]); refresh(); continue
+                if text == "/files":
+                    names = [f"{i + 1}. {a['name']} ({a['kind']})" for i, a in enumerate(attachments)]
+                    self.lines.append("system> Вложения: " + (" · ".join(names) if names else "нет"))
+                    refresh(); continue
+                if text.startswith("/detach"):
+                    try:
+                        index = int(text.split(None, 1)[1]) - 1
+                        attachment = attachments.pop(index)
+                        clear_attachments([attachment])
+                        self.lines.append(f"system> Убрано: {attachment['name']}")
+                    except (ValueError, IndexError):
+                        self.lines.append("system> Используй: /detach НОМЕР (см. /files)")
+                    refresh(); continue
+                if text == "/screenshot":
+                    try:
+                        screenshot = capture_terminal_screenshot()
+                        if len(attachments) >= TUI_MAX_ATTACHMENTS:
+                            clear_attachments([screenshot])
+                            self.lines.append(f"system> Можно прикрепить не более {TUI_MAX_ATTACHMENTS} файлов")
+                        else:
+                            attachments.append(screenshot)
+                            self.lines.append(f"system> Прикреплён скриншот: {screenshot['name']}")
+                    except Exception as exc:
+                        self.lines.append(f"system> Не удалось сделать скриншот: {exc}")
+                    refresh(); continue
                 if text == "/settings":
                     screen = "settings"; refresh(); continue
                 if text == "/modules":
@@ -420,7 +519,7 @@ class TUIChannel(Channel):
                 if text == "/about":
                     self.lines.append(f"system> {self.title} v{__version__} · Python {sys.version.split()[0]}")
                     refresh(); continue
-                if not text:
+                if not text and not attachments:
                     refresh()
                     continue
                 cmd_reply = agent.command(text)
@@ -435,12 +534,17 @@ class TUIChannel(Channel):
                     continue
                 history.append(text)
                 hist_idx = len(history)
-                self.lines.append("you> " + text)
+                label = text if text else "(только вложения)"
+                if attachments:
+                    label += " [📎 " + ", ".join(a["name"] for a in attachments) + "]"
+                self.lines.append("you> " + label)
                 self.lines.append("agent> " + self.title + " думает...")
                 refresh()
                 acc = ""
+                selected_attachments = attachments[:]
+                attachments.clear()
                 try:
-                    for chunk in agent.stream(text):
+                    for chunk in agent.stream(text, attachments=selected_attachments):
                         acc += chunk
                         self.lines[-1] = "agent> " + acc
                         refresh()
@@ -448,10 +552,14 @@ class TUIChannel(Channel):
                     acc = f"[ошибка] {e}"
                     self.lines[-1] = "agent> " + acc
                     refresh()
+                finally:
+                    clear_attachments(selected_attachments)
                 continue
             if char and o is not None and o >= 32 and o != 127:
                 buf += char
                 refresh()
+
+        clear_attachments(attachments)
 
 
 class SocketChannel(Channel):

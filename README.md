@@ -97,7 +97,9 @@ python3 main.py "твоя задача"
 - **TUI** — `python3 main.py tui`: история сверху, ввод снизу, кириллица и перенос
   текста. `F2` открывает настройки (провайдер, модель, workspace, sandbox и retry),
   `F3` — подключённые tools/skills/MCP, `PgUp/PgDn` прокручивает историю,
-  `/about` показывает версию. Режим апрува берётся из конфига.
+  `/about` показывает версию. Вложения: `/attach ПУТЬ`, `/files`, `/detach N` и
+  `/screenshot`; текст и изображения передаются в LLM, прочие файлы доступны как
+  путь для tools. Режим апрува берётся из конфига.
 - **Telegram** — `python3 main.py telegram` (токен из env `TELEGRAM_BOT_TOKEN` или
   `telegram.token` в конфиге; белый список `ALLOWED_USER_IDS`/`telegram.allowed`).
   Поддерживаются слэш-команды (см. ниже).

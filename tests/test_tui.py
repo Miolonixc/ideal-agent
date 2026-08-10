@@ -1,5 +1,6 @@
 from __future__ import annotations
 import importlib
+import os
 import sys
 import tempfile
 import unittest
@@ -88,6 +89,20 @@ class FakeCurses:
 
 
 class TestTUI(unittest.TestCase):
+    def test_attachment_classification(self):
+        sys.modules["curses"] = FakeCurses
+        from agent import channels as ch
+        importlib.reload(ch)
+        with tempfile.TemporaryDirectory() as d:
+            text_path = os.path.join(d, "note.md")
+            image_path = os.path.join(d, "image.png")
+            with open(text_path, "w", encoding="utf-8") as f:
+                f.write("hello")
+            with open(image_path, "wb") as f:
+                f.write(b"not decoded here")
+            self.assertEqual(ch.terminal_attachment(text_path)["kind"], "text")
+            self.assertEqual(ch.terminal_attachment(image_path)["kind"], "image")
+
     def test_session(self):
         sys.modules["curses"] = FakeCurses
         from agent import channels as ch

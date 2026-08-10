@@ -15,6 +15,8 @@ from .tools import ToolRegistry
 
 
 MAX_ITER = 12
+MAX_INLINE_ATTACHMENT_BYTES = 512 * 1024
+MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 
 def _content_to_text(content):
@@ -286,7 +288,10 @@ class Agent:
             if kind == "image":
                 try:
                     with open(att["path"], "rb") as f:
-                        b64 = base64.b64encode(f.read()).decode()
+                        raw = f.read(MAX_IMAGE_ATTACHMENT_BYTES + 1)
+                    if len(raw) > MAX_IMAGE_ATTACHMENT_BYTES:
+                        raise ValueError("изображение больше 8 MiB")
+                    b64 = base64.b64encode(raw).decode()
                     mime = att.get("mime") or "image/jpeg"
                     parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
                 except Exception:
@@ -294,7 +299,9 @@ class Agent:
             elif kind == "text":
                 try:
                     with open(att["path"], "r", errors="replace") as f:
-                        body = f.read()
+                        body = f.read(MAX_INLINE_ATTACHMENT_BYTES + 1)
+                    if len(body) > MAX_INLINE_ATTACHMENT_BYTES:
+                        body = body[:MAX_INLINE_ATTACHMENT_BYTES] + "\n[файл обрезан: лимит 512 KiB]"
                 except Exception:
                     body = ""
                 parts.append({"type": "text", "text": f"[содержимое файла {att.get('name', '')}]:\n{body}"})
