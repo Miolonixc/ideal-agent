@@ -29,9 +29,9 @@ python3 main.py "твоя задача"
 ```json
 {
   "llm": {
-    "provider": "openai-compatible",
-    "base_url": "https://api.tokenrouter.com/v1",
-    "model": "moonshotai/kimi-k3-free"
+    "provider": "openrouter",
+    "base_url": "https://openrouter.ai/api/v1",
+    "model": "openrouter/free"
   },
   "mode": "auto",
   "allow": [],
@@ -42,16 +42,18 @@ python3 main.py "твоя задача"
 }
 ```
 
-Ключ берётся из `IDEAL_LLM_API_KEY` / `TOKENROUTER_API_KEY` (или `llm.api_key` в конфиге).
+Ключ берётся из `IDEAL_LLM_API_KEY` либо стандартной переменной выбранного
+провайдера (например, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`),
+или из `llm.api_key` в конфиге.
 
 ### Полная справка по конфигу
 
 | Поле | Значение по умолчанию | Описание |
 |------|----------------------|----------|
-| `llm.provider` | `openai-compatible` | Провайдер: `openai-compatible`, `openai`, `openrouter`, `ollama`, `anthropic`, `gemini` |
-| `llm.base_url` | `https://api.tokenrouter.com/v1` | Базовый URL чат-комплишена (для openai-совместимых) |
-| `llm.api_key` | — | Ключ (иначе из env `IDEAL_LLM_API_KEY`/`TOKENROUTER_API_KEY`) |
-| `llm.model` | `moonshotai/kimi-k3-free` | Имя модели |
+| `llm.provider` | `openrouter` | Провайдер: `openai-compatible`, `openai`, `openrouter`, `ollama`, `anthropic`, `gemini`, `groq`, `deepseek`, `moonshot`, `together` |
+| `llm.base_url` | `https://openrouter.ai/api/v1` | Базовый URL чат-комплишена (только для OpenAI-совместимых) |
+| `llm.api_key` | — | Ключ (иначе из `IDEAL_LLM_API_KEY` или переменной провайдера) |
+| `llm.model` | `openrouter/free` | Имя модели |
 | `llm.temperature` | `0.3` | Температура генерации |
 | `llm.timeout` | `120` | Таймаут запроса, сек |
 | `llm.max_tokens` | `2048` | Лимит выходных токенов (важен для reasoning-моделей) |
@@ -77,10 +79,14 @@ python3 main.py "твоя задача"
 
 ### Провайдеры LLM
 - `openai-compatible` / `openai` — любой OpenAI-совместимый endpoint (`base_url`+`api_key`).
-- `openrouter` — `https://openrouter.ai/api/v1` (модели многих вендоров).
+- `openrouter` — `https://openrouter.ai/api/v1`; для быстрого старта используй `openrouter/free`.
 - `ollama` — локальный `http://localhost:11434/v1` (офлайн, без ключа).
 - `anthropic` — Claude через Messages API (`api_key` обязателен).
 - `gemini` — Google Gemini через generativeLanguage API (`api_key` обязателен).
+- `groq`, `deepseek`, `moonshot`, `together` — их нативные OpenAI-совместимые API.
+
+Для нативного провайдера `base_url` можно оставить пустым: агент выберет его
+официальный endpoint. Это также защищает старый конфиг от URL TokenRouter.
 
 Переопределить из командной строки: `main.py --provider ollama --model llama3.1 ...`.
 

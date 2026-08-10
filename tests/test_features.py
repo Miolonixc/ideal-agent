@@ -5,10 +5,11 @@ import threading
 import unittest
 import urllib.request
 import urllib.error
+from unittest import mock
 
 sys.path.insert(0, ".")
 
-from agent.llm import get_provider
+from agent.llm import OpenRouterProvider, OllamaProvider, get_provider
 from agent.config import AgentConfig
 from agent.core import Agent
 from agent.channels import HTTPChannel
@@ -46,6 +47,23 @@ class TestProviders(unittest.TestCase):
         c.llm.provider = "nope"
         with self.assertRaises(ValueError):
             get_provider(c.llm)
+
+    def test_native_provider_ignores_legacy_default_url(self):
+        c = AgentConfig()
+        c.llm.provider = "ollama"
+        c.llm.base_url = "https://api.tokenrouter.com/v1"
+        self.assertIsInstance(get_provider(c.llm), OllamaProvider)
+        self.assertEqual(get_provider(c.llm).base_url, "http://localhost:11434/v1")
+
+    def test_openrouter_sends_attribution_headers(self):
+        p = OpenRouterProvider("", "key", "openrouter/free")
+        with mock.patch("urllib.request.urlopen") as u:
+            u.return_value.__enter__.return_value.read.return_value = json.dumps(
+                {"choices": [{"message": {"content": "ok"}}]}
+            ).encode()
+            p.complete([{"role": "user", "content": "hi"}])
+        request = u.call_args.args[0]
+        self.assertEqual(request.get_header("Http-referer"), "https://ideal-agent.local")
 
 
 class TestCommands(unittest.TestCase):

@@ -54,10 +54,21 @@ for line in sys.stdin:
 
 class TestConfig(unittest.TestCase):
     def test_env_key(self):
-        with mock.patch.dict(os.environ, {"TOKENROUTER_API_KEY": "sk-x"}):
-            cfg = load()
-        self.assertTrue(cfg.llm.api_key)
-        self.assertEqual(cfg.llm.model, "moonshotai/kimi-k3-free")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as f:
+            json.dump({"llm": {"provider": "openai-compatible"}}, f)
+            f.flush()
+            with mock.patch.dict(os.environ, {"TOKENROUTER_API_KEY": "sk-x"}, clear=True):
+                cfg = load(f.name)
+        self.assertEqual(cfg.llm.api_key, "sk-x")
+        self.assertEqual(cfg.llm.model, "openrouter/free")
+
+    def test_provider_specific_env_key(self):
+        with mock.patch.dict(os.environ, {"GROQ_API_KEY": "gsk-test"}, clear=True):
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as f:
+                json.dump({"llm": {"provider": "groq"}}, f)
+                f.flush()
+                cfg = load(f.name)
+        self.assertEqual(cfg.llm.api_key, "gsk-test")
 
 
 class TestLLM(unittest.TestCase):

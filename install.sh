@@ -123,9 +123,9 @@ mkdir -p "$CFG_DIR" "$HOME/dev"
 if [ ! -f "$CFG" ]; then
     HTTP_TOKEN="${IDEAL_HTTP_TOKEN:-$($PYBIN -c 'import secrets; print(secrets.token_urlsafe(32))')}"
     CFG_PATH="$CFG" DEST_PATH="$DEST" HOME_PATH="$HOME" HTTP_TOKEN="$HTTP_TOKEN" \
-    LLM_KEY="${IDEAL_LLM_API_KEY:-}" LLM_PROVIDER="${IDEAL_PROVIDER:-openai-compatible}" \
-    LLM_BASE_URL="${IDEAL_BASE_URL:-https://api.tokenrouter.com/v1}" \
-    LLM_MODEL="${IDEAL_MODEL:-moonshotai/kimi-k3-free}" "$PYBIN" - <<'PY'
+    LLM_KEY="${IDEAL_LLM_API_KEY:-${OPENROUTER_API_KEY:-}}" LLM_PROVIDER="${IDEAL_PROVIDER:-openrouter}" \
+    LLM_BASE_URL="${IDEAL_BASE_URL:-https://openrouter.ai/api/v1}" \
+    LLM_MODEL="${IDEAL_MODEL:-openrouter/free}" "$PYBIN" - <<'PY'
 import json
 import os
 

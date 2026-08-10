@@ -33,13 +33,15 @@ class OpenAICompatible:
         if tools:
             body["tools"] = tools
         data = json.dumps(body).encode()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        headers.update(getattr(self, "extra_headers", {}))
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
+            headers=headers,
         )
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             raw = resp.read().decode()
@@ -88,13 +90,15 @@ class OpenAICompatible:
         if tools:
             body["tools"] = tools
         data = _json.dumps(body).encode()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        headers.update(getattr(self, "extra_headers", {}))
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
+            headers=headers,
         )
         tool_acc = {}
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -419,4 +423,13 @@ def get_provider(cfg: "LLMConfig"):
     cls = _PROVIDERS.get(name)
     if not cls:
         raise ValueError(f"unknown provider: {cfg.provider}")
-    return cls(cfg.base_url, cfg.api_key, cfg.model, cfg.temperature, cfg.timeout, cfg.max_tokens)
+    # Старые конфиги использовали TokenRouter как глобальный URL. Не позволяем
+    # этому значению ломать нативные провайдеры при смене только `provider`.
+    inherited_urls = {
+        "https://api.tokenrouter.com/v1",
+        "https://openrouter.ai/api/v1",
+    }
+    base_url = cfg.base_url
+    if name not in ("openai-compatible", "openai") and base_url in inherited_urls:
+        base_url = ""
+    return cls(base_url, cfg.api_key, cfg.model, cfg.temperature, cfg.timeout, cfg.max_tokens)

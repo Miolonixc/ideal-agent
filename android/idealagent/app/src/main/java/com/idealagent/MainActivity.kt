@@ -157,63 +157,6 @@ private const val MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 data class Session(val id: String, var name: String, val messages: MutableList<Message>)
 
-// ---- Провайдеры (с бесплатными опциями) ----
-data class ProviderInfo(
-    val key: String,
-    val label: String,
-    val models: List<String>,
-    val signup: String?,
-    val needsKey: Boolean,
-)
-
-val PROVIDERS = listOf(
-    ProviderInfo(
-        "openrouter", "OpenRouter — много бесплатных моделей",
-        listOf("moonshotai/kimi-k3-free", "meta-llama/llama-3.1-8b-instruct:free", "google/gemma-2-9b-it:free", "deepseek/deepseek-r1-distill-llama-70b:free"),
-        "https://openrouter.ai/keys", true,
-    ),
-    ProviderInfo(
-        "groq", "Groq — очень быстро, бесплатно",
-        listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it", "llama3-70b-8192"),
-        "https://console.groq.com/keys", true,
-    ),
-    ProviderInfo(
-        "deepseek", "DeepSeek — бесплатно и недорого",
-        listOf("deepseek-chat", "deepseek-reasoner"),
-        "https://platform.deepseek.com/api_keys", true,
-    ),
-    ProviderInfo(
-        "moonshot", "Moonshot AI / Kimi — бесплатные модели",
-        listOf("kimi-k3-free", "kimi-k2-free", "moonshot-v1-8k"),
-        "https://platform.moonshot.ai/", true,
-    ),
-    ProviderInfo(
-        "together", "Together AI — открытые модели",
-        listOf("meta-llama/Llama-3.3-70B-Instruct-Turbo", "mistralai/Mixtral-8x7B-Instruct-v0.1", "Qwen/Qwen2.5-72B-Instruct-Turbo"),
-        "https://api.together.xyz/settings/api-keys", true,
-    ),
-    ProviderInfo(
-        "gemini", "Google Gemini — бесплатный ключ",
-        listOf("gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"),
-        "https://aistudio.google.com/apikey", true,
-    ),
-    ProviderInfo(
-        "openai", "OpenAI",
-        listOf("gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"),
-        "https://platform.openai.com/api-keys", true,
-    ),
-    ProviderInfo(
-        "anthropic", "Anthropic Claude",
-        listOf("claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"),
-        "https://console.anthropic.com/settings/keys", true,
-    ),
-    ProviderInfo(
-        "ollama", "Ollama — локально, без ключа",
-        listOf("llama3.1", "qwen2.5", "mistral", "deepseek-r1"),
-        null, false,
-    ),
-)
-
 // ---- Markdown парсер ----
 sealed class MdBlock
 data class CodeBlock(val lang: String, val code: String) : MdBlock()
@@ -462,12 +405,6 @@ object KeyStoreCrypto {
     }
 }
 
-fun loadApiKey(prefs: SharedPreferences): String {
-    val enc = prefs.getString("api_key_enc", "") ?: ""
-    if (enc.isBlank()) return ""
-    return runCatching { KeyStoreCrypto.decrypt(enc) }.getOrDefault("")
-}
-
 fun loadSecret(prefs: SharedPreferences, name: String): String {
     val enc = prefs.getString(name, "") ?: ""
     if (enc.isBlank()) return ""
@@ -477,11 +414,6 @@ fun loadSecret(prefs: SharedPreferences, name: String): String {
 fun saveSecret(prefs: SharedPreferences, name: String, value: String) {
     if (value.isBlank()) prefs.edit().remove(name).apply()
     else prefs.edit().putString(name, KeyStoreCrypto.encrypt(value)).apply()
-}
-
-fun saveApiKey(prefs: SharedPreferences, key: String) {
-    if (key.isBlank()) prefs.edit().remove("api_key_enc").apply()
-    else prefs.edit().putString("api_key_enc", KeyStoreCrypto.encrypt(key)).apply()
 }
 
 fun loadSessions(ctx: Context): List<Session> {

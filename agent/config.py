@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 
 @dataclass
 class LLMConfig:
-    provider: str = "openai-compatible"
-    base_url: str = "https://api.tokenrouter.com/v1"
+    provider: str = "openrouter"
+    base_url: str = "https://openrouter.ai/api/v1"
     api_key: str = ""
-    model: str = "moonshotai/kimi-k3-free"
+    model: str = "openrouter/free"
     temperature: float = 0.3
     timeout: int = 120
     max_tokens: int = 2048
@@ -44,7 +44,22 @@ def load(path=None):
     path = path or os.path.expanduser("~/.config/ideal-agent/config.json")
     data = _read_file(path)
     llm_data = data.get("llm", {})
-    env_key = os.environ.get("IDEAL_LLM_API_KEY") or os.environ.get("TOKENROUTER_API_KEY")
+    provider = (llm_data.get("provider") or LLMConfig.provider).lower()
+    provider_env_keys = {
+        "openrouter": ("OPENROUTER_API_KEY",),
+        "openai": ("OPENAI_API_KEY",),
+        "anthropic": ("ANTHROPIC_API_KEY",),
+        "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "groq": ("GROQ_API_KEY",),
+        "deepseek": ("DEEPSEEK_API_KEY",),
+        "moonshot": ("MOONSHOT_API_KEY",),
+        "together": ("TOGETHER_API_KEY",),
+        "openai-compatible": ("TOKENROUTER_API_KEY",),
+    }
+    env_key = os.environ.get("IDEAL_LLM_API_KEY")
+    if not env_key:
+        env_key = next((os.environ[key] for key in provider_env_keys.get(provider, ())
+                        if os.environ.get(key)), "")
     if not llm_data.get("api_key"):
         if env_key:
             llm_data["api_key"] = env_key
