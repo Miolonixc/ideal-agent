@@ -138,6 +138,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.util.Locale
 import java.util.UUID
@@ -416,6 +417,23 @@ fun saveSecret(prefs: SharedPreferences, name: String, value: String) {
     else prefs.edit().putString(name, KeyStoreCrypto.encrypt(value)).apply()
 }
 
+/** Обычный HTTP допускается только к агенту на этом устройстве. */
+fun agentBaseUrl(host: String): String {
+    val entered = host.trim().removeSuffix("/")
+    require(entered.isNotBlank()) { "Укажите хост и порт агента" }
+    val raw = if ("://" in entered) entered else "http://$entered"
+    val uri = URI(raw)
+    val scheme = uri.scheme?.lowercase() ?: throw IllegalArgumentException("Некорректный адрес")
+    val address = uri.host ?: throw IllegalArgumentException("Некорректный хост")
+    require(uri.userInfo == null && uri.query == null && uri.fragment == null && (uri.path == null || uri.path.isEmpty())) {
+        "Укажите только хост:порт без пути"
+    }
+    require(scheme == "http" || scheme == "https") { "Допустимы только HTTP или HTTPS" }
+    val local = address.equals("localhost", ignoreCase = true) || address == "127.0.0.1" || address == "::1"
+    require(scheme == "https" || local) { "Для удалённого агента используйте HTTPS" }
+    return "$scheme://${uri.rawAuthority}"
+}
+
 fun loadSessions(ctx: Context): List<Session> {
     return try {
         val f = File(ctx.filesDir, "sessions.json")
@@ -592,15 +610,22 @@ fun ChatScreen() {
         if (currentId == id) currentId = sessions.first().id
         saveSessions(context, sessions)
     }
-    fun fetchStatus(h: String) {
+    fun fetchStatus(h: String, token: String) {
         scope.launch {
             val txt = withContext(Dispatchers.IO) {
                 try {
-                    val url = URL("http://$h/status")
+                    val url = URL("${agentBaseUrl(h)}/status")
                     val c = url.openConnection() as HttpURLConnection
-                    c.connectTimeout = 5000
-                    c.readTimeout = 5000
-                    if (c.responseCode == 200) c.inputStream.bufferedReader().readText() else "HTTP ${c.responseCode}"
+                    try {
+                        c.connectTimeout = 5000
+                        c.readTimeout = 5000
+                        if (token.isNotBlank()) c.setRequestProperty("X-Ideal-Agent-Token", token)
+                        val stream = if (c.responseCode in 200..299) c.inputStream else c.errorStream
+                        val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                        if (c.responseCode in 200..299) body else "HTTP ${c.responseCode}${if (body.isBlank()) "" else ": $body"}"
+                    } finally {
+                        c.disconnect()
+                    }
                 } catch (e: Exception) { "ошибка: ${e.message}" }
             }
             messages.add(Message("system", "Статус агента: $txt"))
@@ -622,7 +647,7 @@ fun ChatScreen() {
                     messages.add(Message("system", "Команды: /clear — очистить чат · /new — новый чат · /status — статус агента · /help — справка"))
                     syncCurrent(); prompt = ""; attachments.clear(); return
                 }
-                "/status" -> { tts.stop(); prompt = ""; attachments.clear(); fetchStatus(h); return }
+                "/status" -> { tts.stop(); prompt = ""; attachments.clear(); fetchStatus(h, token); return }
                 else -> { /* неизвестная команда — отправим текстом агенту */ }
             }
         }
@@ -1123,7 +1148,7 @@ fun SettingsPanel(
                 singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
             Text(
-                "Обычно 127.0.0.1:8080 для Termux на этом телефоне.",
+                "Обычно 127.0.0.1:8080 для Termux на этом телефоне. Удалённый агент — только https://хост:порт.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
@@ -1152,7 +1177,7 @@ fun SettingsPanel(
 suspend fun askAgent(host: String, prompt: String, accessToken: String, attachments: List<Attachment> = emptyList(), sessionId: String = "default"): String {
     return withContext(Dispatchers.IO) {
         try {
-            val url = URL("http://$host/message")
+            val url = URL("${agentBaseUrl(host)}/message")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.doOutput = true
@@ -1196,7 +1221,7 @@ suspend fun askAgentStream(
 ): String = withContext(Dispatchers.IO) {
     val full = StringBuilder()
     try {
-        val url = URL("http://$host/message/stream")
+        val url = URL("${agentBaseUrl(host)}/message/stream")
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.doOutput = true
