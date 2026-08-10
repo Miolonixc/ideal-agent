@@ -120,10 +120,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -402,25 +405,55 @@ fun captureScreen(ctx: Context, data: Intent, onCaptured: (Attachment) -> Unit) 
     } catch (_: Exception) { }
 }
 
-fun securePrefs(ctx: Context): SharedPreferences {
-    return try {
+object KeyStoreCrypto {
+    private const val ALIAS = "ideal_agent_ks"
+    private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+    private const val TRANSFORM = "AES/GCM/NoPadding"
+
+    private fun secretKey(): SecretKey {
+        val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        if (ks.containsAlias(ALIAS)) return ks.getKey(ALIAS, null) as SecretKey
+        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         val spec = KeyGenParameterSpec.Builder(
-            "_ideal_agent_key_",
+            ALIAS,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
         ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .build()
-        val masterKeyAlias = MasterKeys.getOrCreate(spec)
-        EncryptedSharedPreferences.create(
-            ctx,
-            "ideal_agent_secure",
-            masterKeyAlias,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-    } catch (_: Exception) {
-        ctx.getSharedPreferences("ideal_agent", Context.MODE_PRIVATE)
+        gen.init(spec)
+        return gen.generateKey()
     }
+
+    fun encrypt(plain: String): String {
+        val cipher = Cipher.getInstance(TRANSFORM)
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+        val iv = cipher.iv
+        val enc = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
+        val out = ByteArray(iv.size + enc.size)
+        System.arraycopy(iv, 0, out, 0, iv.size)
+        System.arraycopy(enc, 0, out, iv.size, enc.size)
+        return Base64.encodeToString(out, Base64.NO_WRAP)
+    }
+
+    fun decrypt(cipherText: String): String {
+        val data = Base64.decode(cipherText, Base64.NO_WRAP)
+        val iv = data.copyOfRange(0, 12)
+        val enc = data.copyOfRange(12, data.size)
+        val cipher = Cipher.getInstance(TRANSFORM)
+        cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, iv))
+        return String(cipher.doFinal(enc), Charsets.UTF_8)
+    }
+}
+
+fun loadApiKey(prefs: SharedPreferences): String {
+    val enc = prefs.getString("api_key_enc", "") ?: ""
+    if (enc.isBlank()) return ""
+    return runCatching { KeyStoreCrypto.decrypt(enc) }.getOrDefault("")
+}
+
+fun saveApiKey(prefs: SharedPreferences, key: String) {
+    if (key.isBlank()) prefs.edit().remove("api_key_enc").apply()
+    else prefs.edit().putString("api_key_enc", KeyStoreCrypto.encrypt(key)).apply()
 }
 
 fun loadSessions(ctx: Context): List<Session> {
@@ -469,11 +502,10 @@ fun saveSessions(ctx: Context, list: List<Session>) {
 fun ChatScreen() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("ideal_agent", Context.MODE_PRIVATE) }
-    val secure = remember { securePrefs(context) }
     var host by remember { mutableStateOf(prefs.getString("host", "192.168.2.107:8080") ?: "192.168.2.107:8080") }
     var provider by remember { mutableStateOf(prefs.getString("provider", "") ?: "") }
     var model by remember { mutableStateOf(prefs.getString("model", "") ?: "") }
-    var apiKey by remember { mutableStateOf(secure.getString("api_key", "") ?: "") }
+    var apiKey by remember { mutableStateOf(loadApiKey(prefs)) }
     var prompt by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -516,6 +548,9 @@ fun ChatScreen() {
         val mgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projectionLauncher.launch(mgr.createScreenCaptureIntent())
     }
+
+    val speechRecognizer = remember { runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull() }
+    val tts = remember { TextToSpeech(context, null) }
     fun startVoiceInput() {
         if (speechRecognizer == null || !SpeechRecognizer.isRecognitionAvailable(context)) {
             Toast.makeText(context, "Распознавание речи недоступно", Toast.LENGTH_SHORT).show()
@@ -532,9 +567,8 @@ fun ChatScreen() {
         if (granted) startVoiceInput() else Toast.makeText(context, "Нет доступа к микрофону", Toast.LENGTH_SHORT).show()
     }
 
-    val speechRecognizer = remember { runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull() }
-    val tts = remember { TextToSpeech(context) { status -> if (status == TextToSpeech.SUCCESS) { try { tts.language = Locale("ru") } catch (_: Exception) { } } } }
     DisposableEffect(Unit) {
+        try { tts.language = Locale("ru") } catch (_: Exception) { }
         val listener = object : RecognitionListener {
             override fun onReadyForSpeech(p: Bundle?) {}
             override fun onBeginningOfSpeech() {}
@@ -561,7 +595,7 @@ fun ChatScreen() {
     LaunchedEffect(host) { prefs.edit().putString("host", host).apply() }
     LaunchedEffect(provider) { prefs.edit().putString("provider", provider).apply() }
     LaunchedEffect(model) { prefs.edit().putString("model", model).apply() }
-    LaunchedEffect(apiKey) { secure.edit().putString("api_key", apiKey).apply() }
+    LaunchedEffect(apiKey) { saveApiKey(prefs, apiKey) }
 
     fun syncCurrent() {
         val s = sessions.first { it.id == currentId }
