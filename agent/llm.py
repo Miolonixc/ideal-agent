@@ -1,14 +1,80 @@
 from __future__ import annotations
 import json
+import socket
+import time
+import urllib.error
 import urllib.request
 from typing import Any, Dict, Iterator, List, Optional
 
 
-def _post(url, body, headers, timeout=120):
+class ProviderError(RuntimeError):
+    """Нормализованная ошибка провайдера без URL и секретов."""
+
+    def __init__(self, provider, message, *, status=None, retryable=False):
+        self.provider = provider
+        self.status = status
+        self.retryable = retryable
+        super().__init__(f"{provider}: {message}")
+
+
+_RETRYABLE_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
+
+
+def _error_detail(exc):
+    try:
+        raw = exc.read().decode(errors="replace").strip()
+        if raw:
+            return raw[:300]
+    except Exception:
+        pass
+    finally:
+        try:
+            exc.close()
+        except Exception:
+            pass
+    return "без деталей"
+
+
+def _retry_delay(exc, attempt):
+    retry_after = exc.headers.get("Retry-After") if getattr(exc, "headers", None) else None
+    try:
+        return min(float(retry_after), 10.0)
+    except (TypeError, ValueError):
+        return min(0.25 * (2 ** attempt), 2.0)
+
+
+def _open_request(url, body, headers, timeout, provider, retries=2):
+    """Открывает запрос и повторяет только явно временные HTTP-ответы.
+
+    Таймауты и обрывы сети не повторяются: сервер мог принять POST, и повтор
+    мог бы создать дублирующий запрос/списание.
+    """
     data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode())
+    for attempt in range(max(0, retries) + 1):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code in _RETRYABLE_HTTP_STATUSES
+            error = ProviderError(
+                provider, f"HTTP {exc.code}: {_error_detail(exc)}",
+                status=exc.code, retryable=retryable,
+            )
+            if retryable and attempt < retries:
+                time.sleep(_retry_delay(exc, attempt))
+                continue
+            raise error from exc
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+            raise ProviderError(provider, "не удалось подключиться или истёк таймаут") from exc
+
+
+def _post(url, body, headers, timeout=120, provider="LLM", retries=2):
+    with _open_request(url, body, headers, timeout, provider, retries) as resp:
+        raw = resp.read().decode(errors="replace")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ProviderError(provider, f"некорректный JSON в ответе: {raw[:300]}") from exc
 
 
 class OpenAICompatible:
@@ -21,6 +87,15 @@ class OpenAICompatible:
         self.temperature = temperature
         self.timeout = timeout
         self.max_tokens = max_tokens
+        self.retries = 2
+
+    def _headers(self):
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        headers.update(getattr(self, "extra_headers", {}))
+        return headers
 
     def complete(self, messages, tools=None, stream=False):
         body = {
@@ -32,38 +107,38 @@ class OpenAICompatible:
         }
         if tools:
             body["tools"] = tools
-        data = json.dumps(body).encode()
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-        headers.update(getattr(self, "extra_headers", {}))
-        req = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
-            data=data,
-            headers=headers,
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            raw = resp.read().decode()
+        with _open_request(
+            f"{self.base_url}/chat/completions", body, self._headers(), self.timeout,
+            self.__class__.__name__, self.retries,
+        ) as resp:
+            raw = resp.read().decode(errors="replace")
         if stream:
             return self._parse_sse(raw)
-        resp = json.loads(raw)
+        try:
+            resp = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ProviderError(self.__class__.__name__, f"некорректный JSON в ответе: {raw[:300]}") from exc
         if not resp.get("choices"):
-            raise RuntimeError(f"провайдер вернул пустой ответ: {raw[:300]}")
+            raise ProviderError(self.__class__.__name__, f"пустой ответ: {raw[:300]}")
         return resp
 
     def _parse_sse(self, raw):
         out = ""
+        payloads = malformed = 0
+        saw_done = False
         for line in raw.splitlines():
             line = line.strip()
             if not line.startswith("data:"):
                 continue
             payload = line[len("data:"):].strip()
             if payload == "[DONE]":
+                saw_done = True
                 break
+            payloads += 1
             try:
                 obj = json.loads(payload)
             except json.JSONDecodeError:
+                malformed += 1
                 continue
             choices = obj.get("choices")
             if not choices:
@@ -71,6 +146,10 @@ class OpenAICompatible:
             delta = choices[0].get("delta", {}).get("content")
             if delta:
                 out += delta
+        if payloads and malformed == payloads:
+            raise ProviderError(self.__class__.__name__, "некорректный SSE-ответ")
+        if payloads and not saw_done:
+            raise ProviderError(self.__class__.__name__, "оборванный SSE-ответ")
         return out
 
     def count_tokens(self, text):
@@ -89,19 +168,11 @@ class OpenAICompatible:
         }
         if tools:
             body["tools"] = tools
-        data = _json.dumps(body).encode()
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-        headers.update(getattr(self, "extra_headers", {}))
-        req = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
-            data=data,
-            headers=headers,
-        )
         tool_acc = {}
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+        with _open_request(
+            f"{self.base_url}/chat/completions", body, self._headers(), self.timeout,
+            self.__class__.__name__, self.retries,
+        ) as resp:
             for raw in resp:
                 line = raw.decode().strip()
                 if not line.startswith("data:"):
@@ -161,6 +232,7 @@ class AnthropicProvider:
         self.temperature = temperature
         self.timeout = timeout
         self.max_tokens = max_tokens
+        self.retries = 2
 
     def _to_anthropic(self, messages, tools):
         system = None
@@ -233,15 +305,12 @@ class AnthropicProvider:
             body["system"] = system
         if ath_tools:
             body["tools"] = ath_tools
-        try:
-            resp = _post(
-                f"{self.base_url}/v1/messages", body,
-                {"Content-Type": "application/json", "x-api-key": self.api_key,
-                 "anthropic-version": "2023-06-01"},
-                timeout=self.timeout,
-            )
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Ошибка Anthropic (HTTP {e.code}): {e.read().decode()[:300]}")
+        resp = _post(
+            f"{self.base_url}/v1/messages", body,
+            {"Content-Type": "application/json", "x-api-key": self.api_key,
+             "anthropic-version": "2023-06-01"},
+            timeout=self.timeout, provider="Anthropic", retries=self.retries,
+        )
         text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
         tool_calls = []
         for b in resp.get("content", []):
@@ -276,6 +345,7 @@ class GeminiProvider:
         self.temperature = temperature
         self.timeout = timeout
         self.max_tokens = max_tokens
+        self.retries = 2
 
     def _to_gemini(self, messages, tools):
         sys_inst = None
@@ -334,10 +404,8 @@ class GeminiProvider:
         if gtools:
             body["tools"] = gtools
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        try:
-            resp = _post(url, body, {"Content-Type": "application/json"}, timeout=self.timeout)
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Ошибка Gemini (HTTP {e.code}): {e.read().decode()[:300]}")
+        resp = _post(url, body, {"Content-Type": "application/json"}, timeout=self.timeout,
+                     provider="Gemini", retries=self.retries)
         cands = resp.get("candidates") or []
         if not cands:
             return {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": []}}]}
@@ -432,4 +500,10 @@ def get_provider(cfg: "LLMConfig"):
     base_url = cfg.base_url
     if name not in ("openai-compatible", "openai") and base_url in inherited_urls:
         base_url = ""
-    return cls(base_url, cfg.api_key, cfg.model, cfg.temperature, cfg.timeout, cfg.max_tokens)
+    provider = cls(base_url, cfg.api_key, cfg.model, cfg.temperature, cfg.timeout, cfg.max_tokens)
+    try:
+        retries = int(getattr(cfg, "retries", 2))
+    except (TypeError, ValueError):
+        retries = 2
+    provider.retries = max(0, min(retries, 5))
+    return provider

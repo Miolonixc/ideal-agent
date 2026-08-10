@@ -1,13 +1,15 @@
 from __future__ import annotations
 import json
+import io
 import os
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
 from agent.config import AgentConfig, load
 from agent.core import Agent
-from agent.llm import OpenAICompatible
+from agent.llm import OpenAICompatible, ProviderError
 from agent.memory import RepoIndex, MemoryStore
 from agent.safety import ApprovalGate, AuditLog, make_diff
 from agent.skills import load_skills
@@ -81,6 +83,33 @@ class TestLLM(unittest.TestCase):
             u.return_value.__enter__.return_value.read.return_value = json.dumps(
                 {"choices": [{"message": {"content": "ок"}}]}).encode()
             self.assertEqual(p.complete([{"role": "user", "content": "hi"}])["choices"][0]["message"]["content"], "ок")
+
+    def test_retries_only_temporary_http_errors(self):
+        err = urllib.error.HTTPError("https://x/v1", 429, "busy", {}, io.BytesIO(b"try later"))
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"choices":[{"message":{"content":"ok"}}]}'
+        with mock.patch("urllib.request.urlopen") as urlopen, mock.patch("time.sleep") as sleep:
+            urlopen.side_effect = [err, response]
+            p = OpenAICompatible("https://x/v1", "key", "model")
+            self.assertEqual(p.complete([{"role": "user", "content": "hi"}])["choices"][0]["message"]["content"], "ok")
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_network_error_is_normalized_without_retry(self):
+        with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("offline")) as urlopen:
+            p = OpenAICompatible("https://x/v1", "key", "model")
+            with self.assertRaisesRegex(ProviderError, "не удалось подключиться"):
+                p.complete([{"role": "user", "content": "hi"}])
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_empty_and_incomplete_stream_are_provider_errors(self):
+        p = OpenAICompatible("https://x/v1", "key", "model")
+        with self.assertRaisesRegex(ProviderError, "пустой ответ"):
+            with mock.patch("urllib.request.urlopen") as urlopen:
+                urlopen.return_value.__enter__.return_value.read.return_value = b'{"choices": []}'
+                p.complete([{"role": "user", "content": "hi"}])
+        with self.assertRaisesRegex(ProviderError, "оборванный SSE"):
+            p._parse_sse('data: {"choices":[{"delta":{"content":"hi"}}]}\n')
 
 
 class TestCore(unittest.TestCase):

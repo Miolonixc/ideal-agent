@@ -55,6 +55,11 @@ class TestProviders(unittest.TestCase):
         self.assertIsInstance(get_provider(c.llm), OllamaProvider)
         self.assertEqual(get_provider(c.llm).base_url, "http://localhost:11434/v1")
 
+    def test_invalid_retry_config_falls_back_to_default(self):
+        c = AgentConfig()
+        c.llm.retries = "not-a-number"
+        self.assertEqual(get_provider(c.llm).retries, 2)
+
     def test_openrouter_sends_attribution_headers(self):
         p = OpenRouterProvider("", "key", "openrouter/free")
         with mock.patch("urllib.request.urlopen") as u:

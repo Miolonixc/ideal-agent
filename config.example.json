@@ -4,7 +4,8 @@
     "base_url": "https://openrouter.ai/api/v1",
     "model": "openrouter/free",
     "api_key": "",
-    "max_tokens": 2048
+    "max_tokens": 2048,
+    "retries": 2
   },
   "mode": "auto",
   "allow": [],
