@@ -121,13 +121,16 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import androidx.security.crypto.MasterKeys
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -401,11 +404,17 @@ fun captureScreen(ctx: Context, data: Intent, onCaptured: (Attachment) -> Unit) 
 
 fun securePrefs(ctx: Context): SharedPreferences {
     return try {
-        val master = MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        val spec = KeyGenParameterSpec.Builder(
+            "_ideal_agent_key_",
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+        ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .build()
+        val masterKeyAlias = MasterKeys.getOrCreate(spec)
         EncryptedSharedPreferences.create(
             ctx,
             "ideal_agent_secure",
-            master,
+            masterKeyAlias,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         )
@@ -507,6 +516,18 @@ fun ChatScreen() {
         val mgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projectionLauncher.launch(mgr.createScreenCaptureIntent())
     }
+    fun startVoiceInput() {
+        if (speechRecognizer == null || !SpeechRecognizer.isRecognitionAvailable(context)) {
+            Toast.makeText(context, "Распознавание речи недоступно", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите")
+        }
+        try { speechRecognizer.startListening(intent) } catch (_: Exception) { }
+    }
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startVoiceInput() else Toast.makeText(context, "Нет доступа к микрофону", Toast.LENGTH_SHORT).show()
     }
@@ -533,18 +554,6 @@ fun ChatScreen() {
             speechRecognizer?.destroy()
             tts.shutdown()
         }
-    }
-    fun startVoiceInput() {
-        if (speechRecognizer == null || !SpeechRecognizer.isRecognitionAvailable(context)) {
-            Toast.makeText(context, "Распознавание речи недоступно", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите")
-        }
-        try { speechRecognizer.startListening(intent) } catch (_: Exception) { }
     }
 
     val listState = rememberLazyListState()
