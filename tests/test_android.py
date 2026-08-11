@@ -18,4 +18,7 @@ class TestAndroidCompanion(unittest.TestCase):
         self.assertEqual(name, "0.2.7")
         self.assertIn("buildConfig = true", gradle)
         with open(os.path.join(ROOT, "app", "src", "main", "java", "com", "idealagent", "MainActivity.kt"), encoding="utf-8") as f:
-            self.assertIn("Версия приложения: ${BuildConfig.VERSION_NAME}", f.read())
+            activity = f.read()
+        self.assertIn("Версия приложения: ${BuildConfig.VERSION_NAME}", activity)
+        self.assertIn("class StreamCancellation", activity)
+        self.assertIn("onClick = { if (busy) cancelStreaming() else send() }", activity)

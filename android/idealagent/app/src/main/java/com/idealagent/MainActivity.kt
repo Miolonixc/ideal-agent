@@ -129,7 +129,11 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -157,6 +161,15 @@ data class Attachment(val name: String, val mime: String, val bytes: ByteArray)
 private const val MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 data class Session(val id: String, var name: String, val messages: MutableList<Message>)
+
+/** Cancels the underlying HTTP read as well as the coroutine consuming it. */
+class StreamCancellation {
+    @Volatile private var connection: HttpURLConnection? = null
+
+    fun attach(value: HttpURLConnection) { connection = value }
+    fun clear(value: HttpURLConnection) { if (connection === value) connection = null }
+    fun cancel() { connection?.disconnect() }
+}
 
 // ---- Markdown парсер ----
 sealed class MdBlock
@@ -484,6 +497,8 @@ fun ChatScreen() {
     var accessToken by remember { mutableStateOf(loadSecret(prefs, "http_token_enc")) }
     var prompt by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var requestJob by remember { mutableStateOf<Job?>(null) }
+    var streamCancellation by remember { mutableStateOf<StreamCancellation?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
     val attachments = remember { mutableStateListOf<Attachment>() }
     var attachMenu by remember { mutableStateOf(false) }
@@ -597,7 +612,13 @@ fun ChatScreen() {
         s.messages.addAll(messages)
         saveSessions(context, sessions)
     }
+    fun cancelStreaming() {
+        streamCancellation?.cancel()
+        requestJob?.cancel()
+    }
     fun createNewSession() {
+        cancelStreaming()
+        syncCurrent()
         val s = Session(UUID.randomUUID().toString(), "Новый чат", mutableListOf())
         sessions.add(s)
         currentId = s.id
@@ -605,6 +626,7 @@ fun ChatScreen() {
     fun deleteSession(id: String) {
         val idx = sessions.indexOfFirst { it.id == id }
         if (idx < 0) return
+        if (currentId == id) cancelStreaming()
         sessions.removeAt(idx)
         if (sessions.isEmpty()) sessions.add(Session(UUID.randomUUID().toString(), "Чат 1", mutableListOf()))
         if (currentId == id) currentId = sessions.first().id
@@ -640,7 +662,7 @@ fun ChatScreen() {
         val trimmed = p.trim()
         if (trimmed.startsWith("/")) {
             when (trimmed) {
-                "/clear" -> { tts.stop(); messages.clear(); syncCurrent(); prompt = ""; attachments.clear(); return }
+                "/clear" -> { cancelStreaming(); tts.stop(); messages.clear(); syncCurrent(); prompt = ""; attachments.clear(); return }
                 "/new" -> { tts.stop(); createNewSession(); prompt = ""; attachments.clear(); return }
                 "/help" -> {
                     tts.stop()
@@ -660,24 +682,43 @@ fun ChatScreen() {
             if (cur.name == "Новый чат" || cur.name == "Чат 1") cur.name = (if (p.isBlank()) "(вложение)" else p).take(24)
         }
         val agentIdx = messages.size
+        val requestSessionId = currentId
+        val cancellation = StreamCancellation()
         messages.add(Message("agent", ""))
         busy = true
-        scope.launch {
-            askAgentStream(h, p, token, atts, currentId) { chunk ->
-                val cur = messages.getOrNull(agentIdx)?.text ?: ""
-                messages[agentIdx] = Message("agent", cur + chunk)
+        streamCancellation = cancellation
+        requestJob = scope.launch {
+            try {
+                askAgentStream(h, p, token, atts, requestSessionId, cancellation) { chunk ->
+                    if (currentId == requestSessionId) {
+                        val cur = messages.getOrNull(agentIdx)?.text ?: ""
+                        messages[agentIdx] = Message("agent", cur + chunk)
+                    }
+                }
+            } catch (_: CancellationException) {
+                if (currentId == requestSessionId && messages.getOrNull(agentIdx)?.text.isNullOrBlank()) {
+                    messages[agentIdx] = Message("agent", "(ответ отменён)")
+                }
             }
-            val reply = messages.getOrNull(agentIdx)?.text ?: ""
-            if (reply.isBlank()) {
-                messages[agentIdx] = Message("agent", "(нет ответа)")
-            } else if (ttsOn) {
-                val spoken = reply.replace(Regex("```[\\s\\S]*?```"), " ")
-                    .replace(Regex("!\\[.*?\\]\\(.*?\\)"), " ")
-                    .replace(Regex("[*_`#>]"), "").trim()
-                if (spoken.isNotBlank()) tts.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, null)
+            finally {
+                if (currentId == requestSessionId) {
+                    val reply = messages.getOrNull(agentIdx)?.text ?: ""
+                    if (reply.isBlank()) {
+                        messages[agentIdx] = Message("agent", "(нет ответа)")
+                    } else if (ttsOn) {
+                        val spoken = reply.replace(Regex("```[\\s\\S]*?```"), " ")
+                            .replace(Regex("!\\[.*?\\]\\(.*?\\)"), " ")
+                            .replace(Regex("[*_`#>]"), "").trim()
+                        if (spoken.isNotBlank()) tts.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, null)
+                    }
+                    syncCurrent()
+                }
+                if (streamCancellation === cancellation) {
+                    streamCancellation = null
+                    requestJob = null
+                    busy = false
+                }
             }
-            syncCurrent()
-            busy = false
         }
     }
 
@@ -717,7 +758,14 @@ fun ChatScreen() {
                                         color = if (s.id == currentId) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                     )
                                 },
-                                onClick = { sessionsMenu = false; if (s.id != currentId) currentId = s.id },
+                                onClick = {
+                                    sessionsMenu = false
+                                    if (s.id != currentId) {
+                                        cancelStreaming()
+                                        syncCurrent()
+                                        currentId = s.id
+                                    }
+                                },
                                 trailingIcon = {
                                     IconButton(onClick = { sessionsMenu = false; deleteSession(s.id) }) {
                                         Icon(Icons.Filled.Delete, contentDescription = "Удалить", modifier = Modifier.size(16.dp))
@@ -907,12 +955,12 @@ fun ChatScreen() {
                             Icon(if (ttsOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, contentDescription = "Озвучка ответов")
                         }
                         FilledIconButton(
-                            onClick = { send() },
-                            enabled = !busy && (prompt.isNotBlank() || attachments.isNotEmpty()),
+                            onClick = { if (busy) cancelStreaming() else send() },
+                            enabled = busy || prompt.isNotBlank() || attachments.isNotEmpty(),
                             modifier = Modifier.size(48.dp),
                         ) {
                             if (busy) {
-                                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                                Text("■", style = MaterialTheme.typography.titleMedium)
                             } else {
                                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить")
                             }
@@ -1226,18 +1274,22 @@ suspend fun askAgentStream(
     host: String, prompt: String, accessToken: String,
     attachments: List<Attachment> = emptyList(),
     sessionId: String = "default",
+    cancellation: StreamCancellation? = null,
     onChunk: (String) -> Unit,
 ): String = withContext(Dispatchers.IO) {
     val full = StringBuilder()
+    var conn: HttpURLConnection? = null
     try {
         val url = URL("${agentBaseUrl(host)}/message/stream")
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.doOutput = true
-        conn.setRequestProperty("Content-Type", "application/json")
-        if (accessToken.isNotBlank()) conn.setRequestProperty("X-Ideal-Agent-Token", accessToken)
-        conn.connectTimeout = 120_000
-        conn.readTimeout = 120_000
+        val connection = url.openConnection() as HttpURLConnection
+        conn = connection
+        cancellation?.attach(connection)
+        connection.requestMethod = "POST"
+        connection.doOutput = true
+        connection.setRequestProperty("Content-Type", "application/json")
+        if (accessToken.isNotBlank()) connection.setRequestProperty("X-Ideal-Agent-Token", accessToken)
+        connection.connectTimeout = 120_000
+        connection.readTimeout = 120_000
         val obj = JSONObject()
         obj.put("text", prompt)
         obj.put("session_id", sessionId)
@@ -1252,27 +1304,33 @@ suspend fun askAgentStream(
             }
             obj.put("attachments", arr)
         }
-        conn.outputStream.write(obj.toString().toByteArray())
-        val reader = conn.inputStream.bufferedReader()
-        var line = reader.readLine()
-        while (line != null) {
-            if (line.startsWith("data:")) {
-                val payload = line.removePrefix("data:").trim()
-                if (payload == "[DONE]") break
-                try {
-                    val chunk = JSONObject(payload).optString("chunk", "")
-                    if (chunk.isNotEmpty()) {
-                        full.append(chunk)
-                        withContext(Dispatchers.Main) { onChunk(chunk) }
-                    }
-                } catch (_: Exception) { }
+        connection.outputStream.use { it.write(obj.toString().toByteArray()) }
+        connection.inputStream.bufferedReader().use { reader ->
+            var line = reader.readLine()
+            while (line != null) {
+                if (line.startsWith("data:")) {
+                    val payload = line.removePrefix("data:").trim()
+                    if (payload == "[DONE]") break
+                    try {
+                        val chunk = JSONObject(payload).optString("chunk", "")
+                        if (chunk.isNotEmpty()) {
+                            full.append(chunk)
+                            withContext(Dispatchers.Main) { onChunk(chunk) }
+                        }
+                    } catch (_: Exception) { }
+                }
+                line = reader.readLine()
             }
-            line = reader.readLine()
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
+        if (!currentCoroutineContext().isActive) throw CancellationException()
         val msg = "\nошибка: ${e.message}"
         full.append(msg)
         withContext(Dispatchers.Main) { onChunk(msg) }
+    } finally {
+        conn?.let { cancellation?.clear(it); it.disconnect() }
     }
     full.toString()
 }
