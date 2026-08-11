@@ -40,6 +40,12 @@ jobs:
           cd android/idealagent/app/build/outputs/apk/debug
           sha256sum *.apk > ideal-agent-app-debug.apk.sha256
 
+      - name: Create declared-dependencies SBOM
+        run: |
+          python3 tools/generate_android_sbom.py \
+            --gradle android/idealagent/app/build.gradle.kts \
+            --output android/idealagent/app/build/outputs/apk/debug/ideal-agent-app-debug.sbom.json
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -47,4 +53,5 @@ jobs:
           path: |
             android/idealagent/app/build/outputs/apk/debug/*.apk
             android/idealagent/app/build/outputs/apk/debug/*.sha256
+            android/idealagent/app/build/outputs/apk/debug/*.sbom.json
           if-no-files-found: error

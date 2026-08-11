@@ -9,7 +9,8 @@
 ## Сборка
 1. Открой папку `android/idealagent` в Android Studio (или `gradle build`). Версия
    установлена в `app/build.gradle.kts` и отображается в настройках приложения.
-   GitHub Actions публикует APK вместе с файлом `.sha256`; проверить скачанный
+   GitHub Actions публикует APK вместе с файлом `.sha256` и CycloneDX SBOM
+   объявленных Android-зависимостей (`.sbom.json`); проверить скачанный
    APK можно командой `sha256sum -c ideal-agent-app-debug.apk.sha256`.
 2. Gradle wrapper сгенерируется при первом открытии; либо `gradle wrapper`.
 3. Запусти на устройстве/эмуляторе (minSdk 24).
