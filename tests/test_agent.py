@@ -285,6 +285,18 @@ class TestMCP(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             mc.list_tools()
 
+    def test_oversized_server_message_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = os.path.join(tmp, "too_large.py")
+            with open(server, "w") as f:
+                f.write("import sys\nprint('x' * 4096, flush=True)\nsys.stdin.read()\n")
+            mc = MCPClient("python3", [server], timeout=1, max_message_bytes=1024)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "превысил лимит"):
+                    mc.initialize()
+            finally:
+                mc.close()
+
 
 class TestChannels(unittest.TestCase):
     def test_cli(self):

@@ -16,33 +16,24 @@
   переменных и нормализованные ошибки; 408/429/5xx повторяются с backoff.
 - Android-компаньон не принимает и не пересылает ключ LLM; APK собирается в CI.
 
-## P1 — следующий цикл
+## Закрыто после первого плана
 
-1. Изоляция проектной памяти.
-   - Добавить namespace от канонического пути workspace для MemoryStore и RepoIndex.
-   - Критерий: факты/индекс проекта A никогда не появляются в проекте B.
+- Память и индекс изолированы namespace от канонического пути workspace.
+- В GitHub Actions добавлен интеграционный sandbox-тест Bubblewrap.
+- Ошибки провайдеров нормализованы, временные HTTP-ошибки повторяются.
+- HTTP ограничивает размер сообщений и частоту запросов.
+- Skills и MCP требуют явного доверия, получают namespace и не могут заменить
+  встроенные инструменты.
+- MCP ограничивает размер входящего JSON-RPC сообщения (256 KiB), отменяет
+  запрос при таймауте и аварийно завершает сервер, нарушивший лимит.
 
-2. Интеграционные sandbox-тесты в Ubuntu CI.
-   - Проверить bwrap/unshare: нет сети, запись только в workspace, чтение вне него
-     заблокировано.
-   - Критерий: отдельная обязательная GitHub Actions job.
+## P2 — следующий цикл
 
-3. Полнота ошибок провайдеров.
-   - Покрыть реальными mock-сценариями Anthropic/Gemini, пустой ответ и обрыв SSE.
-   - Показать пользователю тип ошибки (auth/rate-limit/timeout) без секретов.
-
-4. HTTP для долгоживущей эксплуатации.
-   - Ограничить длину `text`, добавить rate limit по токену/IP и негативные тесты
-     конкурентных сессий.
-
-## P2 — расширяемость и Android
-
-1. Skills/MCP manifest разрешений: filesystem, network, shell, secrets; отдельное
-   подтверждение для первого запуска непроверенного расширения.
-2. MCP cancellation, лимиты stdout/stderr и тест аварийного процесса.
-3. Android: состояния offline/connecting/connected/error, отмена streaming,
+1. Развить manifest skills/MCP до отдельных разрешений `filesystem`, `network`,
+   `shell`, `secrets` и добавить интерактивное подтверждение первого запуска.
+2. Android: состояния offline/connecting/connected/error, отмена streaming,
    Compose UI и сетевые тесты, светлая тема и accessibility.
-4. Команды `/audit`, `/health` и `--dry-run` для диагностики и безопасного preview.
+3. Команды `/audit`, `/health` и `--dry-run` для диагностики и безопасного preview.
 
 ## P3 — выпуск
 
@@ -52,8 +43,6 @@
 
 ## Рекомендуемый порядок
 
-1. `feat: namespace memory by workspace`
-2. `test: add Ubuntu sandbox integration job`
-3. `fix: rate-limit HTTP channel and classify provider errors`
-4. `feat: add MCP permissions manifest`
-5. `feat(android): connection state, cancellation and UI tests`
+1. `feat: detailed extension permissions and first-run approval`
+2. `feat: add diagnostics commands and dry-run`
+3. `feat(android): connection state, cancellation and UI tests`
