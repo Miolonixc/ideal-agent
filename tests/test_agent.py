@@ -81,6 +81,8 @@ class TestConfig(unittest.TestCase):
             cfg = AgentConfig()
             cfg.llm.model = "new-model"
             cfg.mode = "suggest"
+            cfg.trusted_extensions = ["skill:lint"]
+            cfg.extension_permissions = ["shell"]
             save_runtime_settings(cfg, path)
             with open(path, encoding="utf-8") as f:
                 saved = json.load(f)
@@ -88,6 +90,8 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(saved["llm"]["custom"], "value")
         self.assertEqual(saved["llm"]["model"], "new-model")
         self.assertTrue(saved["other"])
+        self.assertEqual(saved["trusted_extensions"], ["skill:lint"])
+        self.assertEqual(saved["extension_permissions"], ["shell"])
 
 
 class TestLLM(unittest.TestCase):

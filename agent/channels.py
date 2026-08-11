@@ -277,6 +277,7 @@ class TUIChannel(Channel):
             ("Провайдер", "provider"), ("Модель", "model"), ("Base URL", "base_url"),
             ("Режим апрува", "mode"), ("Workspace", "workspace"),
             ("Sandbox", "sandbox_mode"), ("Контекст", "use_context"),
+            ("Доверенные extensions", "trusted_extensions"),
             ("Разрешения extensions", "extension_permissions"),
             ("Таймаут (сек)", "timeout"), ("Повторы HTTP", "retries"),
         ]
@@ -293,7 +294,7 @@ class TUIChannel(Channel):
             hist.scrollok(True)
 
         def setting_value(key):
-            if key == "extension_permissions":
+            if key in ("trusted_extensions", "extension_permissions"):
                 return ", ".join(getattr(agent.cfg, key) or []) or "нет"
             if key in ("provider", "model", "base_url", "timeout", "retries"):
                 return str(getattr(agent.cfg.llm, key))
@@ -353,8 +354,11 @@ class TUIChannel(Channel):
                 try:
                     if key in ("timeout", "retries"):
                         setattr(agent.cfg.llm, key, int(raw))
-                    elif key == "extension_permissions":
-                        agent.cfg.extension_permissions = [item.strip().lower() for item in raw.split(",") if item.strip()]
+                    elif key in ("trusted_extensions", "extension_permissions"):
+                        values = [item.strip() for item in raw.split(",") if item.strip()]
+                        if key == "extension_permissions":
+                            values = [item.lower() for item in values]
+                        setattr(agent.cfg, key, values)
                     elif key in ("provider", "model", "base_url"):
                         old = (agent.cfg.llm.provider, agent.cfg.llm.model, agent.cfg.llm.base_url, agent.provider)
                         setattr(agent.cfg.llm, key, raw)
