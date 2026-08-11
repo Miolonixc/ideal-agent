@@ -162,6 +162,8 @@ private const val MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 data class Session(val id: String, var name: String, val messages: MutableList<Message>)
 
+enum class ConnectionState { Offline, Connecting, Online, Error }
+
 /** Cancels the underlying HTTP read as well as the coroutine consuming it. */
 class StreamCancellation {
     @Volatile private var connection: HttpURLConnection? = null
@@ -497,6 +499,7 @@ fun ChatScreen() {
     var accessToken by remember { mutableStateOf(loadSecret(prefs, "http_token_enc")) }
     var prompt by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var connectionState by remember { mutableStateOf(ConnectionState.Offline) }
     var requestJob by remember { mutableStateOf<Job?>(null) }
     var streamCancellation by remember { mutableStateOf<StreamCancellation?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -633,6 +636,7 @@ fun ChatScreen() {
         saveSessions(context, sessions)
     }
     fun fetchStatus(h: String, token: String) {
+        connectionState = ConnectionState.Connecting
         scope.launch {
             val txt = withContext(Dispatchers.IO) {
                 try {
@@ -651,6 +655,11 @@ fun ChatScreen() {
                 } catch (e: Exception) { "ошибка: ${e.message}" }
             }
             messages.add(Message("system", "Статус агента: $txt"))
+            connectionState = if (txt.startsWith("ошибка:") || txt.startsWith("HTTP ")) {
+                ConnectionState.Error
+            } else {
+                ConnectionState.Online
+            }
             syncCurrent()
         }
     }
@@ -686,16 +695,19 @@ fun ChatScreen() {
         val cancellation = StreamCancellation()
         messages.add(Message("agent", ""))
         busy = true
+        connectionState = ConnectionState.Connecting
         streamCancellation = cancellation
         requestJob = scope.launch {
             try {
-                askAgentStream(h, p, token, atts, requestSessionId, cancellation) { chunk ->
+                val reply = askAgentStream(h, p, token, atts, requestSessionId, cancellation) { chunk ->
                     if (currentId == requestSessionId) {
                         val cur = messages.getOrNull(agentIdx)?.text ?: ""
                         messages[agentIdx] = Message("agent", cur + chunk)
                     }
                 }
+                connectionState = if (reply.contains("\nошибка:")) ConnectionState.Error else ConnectionState.Online
             } catch (_: CancellationException) {
+                connectionState = ConnectionState.Offline
                 if (currentId == requestSessionId && messages.getOrNull(agentIdx)?.text.isNullOrBlank()) {
                     messages[agentIdx] = Message("agent", "(ответ отменён)")
                 }
@@ -802,6 +814,7 @@ fun ChatScreen() {
                 SettingsPanel(
                     host = host, onHost = { host = it },
                     accessToken = accessToken, onAccessToken = { accessToken = it },
+                    connectionState = connectionState,
                 )
             }
 
@@ -1179,6 +1192,7 @@ fun CodeCard(lang: String, code: String, onCopy: () -> Unit) {
 fun SettingsPanel(
     host: String, onHost: (String) -> Unit,
     accessToken: String, onAccessToken: (String) -> Unit,
+    connectionState: ConnectionState,
 ) {
     var showToken by remember { mutableStateOf(false) }
 
@@ -1190,6 +1204,23 @@ fun SettingsPanel(
     ) {
         Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Text("Подключение к агенту", style = MaterialTheme.typography.titleMedium)
+            val stateText = when (connectionState) {
+                ConnectionState.Offline -> "Не проверено"
+                ConnectionState.Connecting -> "Подключение…"
+                ConnectionState.Online -> "Подключено"
+                ConnectionState.Error -> "Ошибка подключения"
+            }
+            val stateColor = when (connectionState) {
+                ConnectionState.Online -> MaterialTheme.colorScheme.primary
+                ConnectionState.Error -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Text(
+                "Состояние: $stateText",
+                style = MaterialTheme.typography.labelLarge,
+                color = stateColor,
+                modifier = Modifier.padding(top = 6.dp),
+            )
             OutlinedTextField(
                 value = host, onValueChange = onHost,
                 label = { Text("Хост:порт агента") },
