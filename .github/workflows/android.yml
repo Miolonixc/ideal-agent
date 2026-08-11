@@ -35,9 +35,16 @@ jobs:
           /tmp/gradle-${GRADLE_VERSION}/bin/gradle \
             --project-dir android/idealagent --no-daemon assembleDebug
 
+      - name: Create APK checksum
+        run: |
+          cd android/idealagent/app/build/outputs/apk/debug
+          sha256sum *.apk > ideal-agent-app-debug.apk.sha256
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ideal-agent-app-debug
-          path: android/idealagent/app/build/outputs/apk/debug/*.apk
+          path: |
+            android/idealagent/app/build/outputs/apk/debug/*.apk
+            android/idealagent/app/build/outputs/apk/debug/*.sha256
           if-no-files-found: error
