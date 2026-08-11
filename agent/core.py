@@ -130,6 +130,7 @@ class Agent:
         self._loaded_skills = load_skills(
             self.registry, skills_dir,
             trusted_extensions=getattr(self.cfg, "trusted_extensions", []),
+            allowed_permissions=getattr(self.cfg, "extension_permissions", []),
         )
         return self._loaded_skills
 

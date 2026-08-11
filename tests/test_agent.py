@@ -273,6 +273,25 @@ class TestSkills(unittest.TestCase):
             load_skills(reg, os.path.join(tmp, "skills"), trusted_extensions=[])
             self.assertIn("заблокировано", reg.call("skill_unsafe", "{}"))
 
+    def test_skill_requires_declared_permissions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sd = os.path.join(tmp, "skills", "checked")
+            os.makedirs(sd)
+            with open(os.path.join(sd, "SKILL.md"), "w") as f:
+                f.write("---\nname: checked\npermissions: filesystem, network\n---\n")
+            with open(os.path.join(sd, "run.sh"), "w") as f:
+                f.write("#!/bin/sh\necho ok\n")
+            os.chmod(os.path.join(sd, "run.sh"), 0o755)
+            reg = ToolRegistry()
+            load_skills(reg, os.path.join(tmp, "skills"),
+                        trusted_extensions=["skill:checked"], allowed_permissions=["shell"])
+            self.assertIn("filesystem, network", reg.call("skill_checked", "{}"))
+            reg = ToolRegistry()
+            load_skills(reg, os.path.join(tmp, "skills"),
+                        trusted_extensions=["skill:checked"],
+                        allowed_permissions=["shell", "filesystem", "network"])
+            self.assertEqual(reg.call("skill_checked", "{}"), "ok\n")
+
 
 class TestMCP(unittest.TestCase):
     def test_agent_requires_explicit_mcp_trust(self):

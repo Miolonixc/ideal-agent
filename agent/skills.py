@@ -6,6 +6,9 @@ import re
 from typing import List, Optional
 
 
+VALID_PERMISSIONS = {"filesystem", "network", "shell", "secrets"}
+
+
 def _parse_manifest(path: str):
     with open(path, encoding="utf-8") as f:
         text = f.read()
@@ -36,9 +39,22 @@ def tool_name(name: str) -> str:
     return "skill_" + safe_name
 
 
-def load_skills(registry, skills_dir: str, trusted_extensions=None) -> List[str]:
+def manifest_permissions(value, has_script: bool) -> List[str]:
+    """Parse a compact frontmatter list and reject unknown capabilities."""
+    raw = str(value or "").strip().strip("[]")
+    permissions = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    if has_script and "shell" not in permissions:
+        permissions.append("shell")
+    return sorted(set(permissions) & VALID_PERMISSIONS)
+
+
+def load_skills(registry, skills_dir: str, trusted_extensions=None,
+                allowed_permissions=None) -> List[str]:
     if not os.path.isdir(skills_dir):
         return []
+    # Direct library callers retain the historic unrestricted behaviour;
+    # Agent always passes its explicit config policy.
+    allowed_permissions = VALID_PERMISSIONS if allowed_permissions is None else allowed_permissions
     loaded = []
     for name in sorted(os.listdir(skills_dir)):
         skill_dir = os.path.join(skills_dir, name)
@@ -50,12 +66,17 @@ def load_skills(registry, skills_dir: str, trusted_extensions=None) -> List[str]
         sdesc = meta.get("description", desc) or name
         script = _find_script(skill_dir)
         trusted = trusted_extensions is None or _is_trusted(trusted_extensions, "skill", sname)
+        required_permissions = manifest_permissions(meta.get("permissions"), bool(script))
 
-        def make_handler(script, skill_dir, desc, trusted, sname):
+        def make_handler(script, skill_dir, desc, trusted, sname, required_permissions):
             def handler(args):
                 if script and not trusted:
                     return (f"заблокировано: skill '{sname}' не отмечен доверенным. "
                             f"Добавь 'skill:{sname}' в trusted_extensions конфига.")
+                missing = sorted(set(required_permissions) - set(allowed_permissions or []))
+                if missing:
+                    return (f"заблокировано: skill '{sname}' требует разрешения "
+                            f"{', '.join(missing)}. Добавь их в extension_permissions конфига.")
                 if script:
                     try:
                         env = dict(os.environ)
@@ -75,7 +96,7 @@ def load_skills(registry, skills_dir: str, trusted_extensions=None) -> List[str]
             sdesc,
             {"type": "object", "properties": {"input": {"type": "string"}},
              "required": []},
-            make_handler(script, skill_dir, desc, trusted, sname),
+            make_handler(script, skill_dir, desc, trusted, sname, required_permissions),
             source="skill",
         )
         loaded.append(sname)

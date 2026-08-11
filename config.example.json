@@ -15,6 +15,7 @@
   "skills_dir": "skills",
   "mcp_servers": [],
   "trusted_extensions": [],
+  "extension_permissions": [],
   "use_context": true,
   "http": {
     "host": "127.0.0.1",

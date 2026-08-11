@@ -143,6 +143,7 @@ config = {
     "skills_dir": os.path.join(os.environ["DEST_PATH"], "skills"),
     "mcp_servers": [],
     "trusted_extensions": [],
+    "extension_permissions": [],
     "use_context": True,
     "http": {"host": "127.0.0.1", "token": os.environ["HTTP_TOKEN"], "github_webhook_secret": ""},
     "telegram": {"token": "", "allowed": []},

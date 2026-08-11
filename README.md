@@ -66,6 +66,8 @@ python3 main.py "твоя задача"
 | `context_budget` | `6000` | Бюджет токенов до компакшна истории |
 | `skills_dir` | — | Папка с навыками |
 | `mcp_servers` | `[]` | Список `["cmd args", ...]` MCP-серверов |
+| `trusted_extensions` | `[]` | Явно доверенные `skill:name`/`mcp:name`; без этого внешний код не запускается |
+| `extension_permissions` | `[]` | Допустимые capabilities skills: `filesystem`, `network`, `shell`, `secrets` |
 | `embeddings` | — | `{"provider":"hash"}` или `{"provider":"remote",...}` |
 | `use_context` | `true` | Авто-извлечение контекста в промпт |
 | `http.host` | `127.0.0.1` | Адрес HTTP-канала; внешний адрес требует `http.token` |
@@ -187,7 +189,10 @@ HTTP по умолчанию слушает только `127.0.0.1`; для в�
 Положи навыки в `skills/<name>/`: `SKILL.md` (frontmatter `name`/`description`) + `run.sh`/`run.py`.
 Скрипт получает JSON аргументов на stdin и пишет результат в stdout.
 Исполняемые skills выключены до явного доверия: добавь в конфиг
-`"trusted_extensions": ["skill:<name>"]` (или `"skill:*"`). В модели они
+`"trusted_extensions": ["skill:<name>"]` (или `"skill:*"`). Скрипт требует
+как минимум `shell`; укажи его в `extension_permissions`. В `SKILL.md` можно
+объявить дополнительные возможности: `permissions: filesystem, network`.
+В модели они
 появляются как `skill_<name>`, поэтому не могут подменить встроенный tool.
 
 ```
