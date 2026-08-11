@@ -16,6 +16,6 @@ class TestAndroidCompanion(unittest.TestCase):
         name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle).group(1)
         self.assertGreaterEqual(code, 9)
         self.assertEqual(name, "0.2.7")
+        self.assertIn("buildConfig = true", gradle)
         with open(os.path.join(ROOT, "app", "src", "main", "java", "com", "idealagent", "MainActivity.kt"), encoding="utf-8") as f:
             self.assertIn("Версия приложения: ${BuildConfig.VERSION_NAME}", f.read())
-
