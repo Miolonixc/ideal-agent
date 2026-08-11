@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -256,7 +257,9 @@ class Agent:
                 "/clear — очистить контекст диалога\n"
                 "/status — модель/режим/число тулов\n"
                 "/skills — список доступных навыков и тулов\n"
-                "/provider — текущий провайдер/модель"
+                "/provider — текущий провайдер/модель\n"
+                "/health — локальная диагностика без сетевого запроса\n"
+                "/audit [N] — последние N записей выполнения tools"
             )
         if cmd == "mode":
             if arg in ("auto", "suggest", "full-auto"):
@@ -275,7 +278,48 @@ class Agent:
         if cmd == "skills":
             names = sorted(self.registry._tools.keys())
             return "навыки и тулы: " + ", ".join(names)
+        if cmd == "health":
+            return self.health_report()
+        if cmd == "audit":
+            try:
+                limit = int(arg) if arg else 10
+            except ValueError:
+                return "используй: /audit [1..50]"
+            rows = self.audit.recent(limit)
+            if not rows:
+                return "audit-log пока пуст"
+            return "\n".join(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(row['ts']))} "
+                f"{row['decision']} {row['tool']} — {str(row['result'])[:160]}"
+                for row in rows
+            )
         return None
+
+    def health_report(self):
+        """Local-only health information safe to show in any channel."""
+        workspace = os.path.expanduser(self.cfg.workspace)
+        clients = getattr(self, "_mcp_clients", [])
+        alive = sum(1 for client in clients if client.proc.poll() is None)
+        return "\n".join((
+            "status: ok",
+            f"provider: {self.provider.__class__.__name__} / {self.provider.model}",
+            f"workspace: {'ok' if os.path.isdir(workspace) else 'не найдена'} ({workspace})",
+            f"tools: {len(self.registry._tools)}; skills: {len(self._loaded_skills)}",
+            f"mcp: {alive}/{len(clients)} запущено",
+            f"mode: {self.gate.mode}; sandbox: {self.cfg.sandbox_mode}",
+        ))
+
+    def dry_run_report(self, mcp_specs=None):
+        """Report effective setup without contacting an LLM or starting MCP."""
+        mcp_specs = [str(spec) for spec in (mcp_specs or []) if str(spec).strip()]
+        trusted = sorted(getattr(self.cfg, "trusted_extensions", []) or [])
+        return "\n".join((
+            "dry-run: конфигурация прочитана; LLM, tools и MCP не запускались",
+            f"provider: {self.provider.__class__.__name__} / {self.provider.model}",
+            f"workspace: {os.path.expanduser(self.cfg.workspace)}",
+            f"built-in tools: {len(self.registry._tools)}; discovered skills: {len(self._loaded_skills)}",
+            f"configured MCP: {len(mcp_specs)}; trusted extensions: {', '.join(trusted) or 'нет'}",
+        ))
 
     def command_in_session(self, session_id, text):
         with self._run_lock:

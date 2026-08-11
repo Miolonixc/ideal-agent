@@ -90,6 +90,8 @@ python3 main.py "твоя задача"
 официальный endpoint. Это также защищает старый конфиг от URL TokenRouter.
 
 Переопределить из командной строки: `main.py --provider ollama --model llama3.1 ...`.
+Проверить итоговую конфигурацию без запроса к LLM, запуска tools или MCP:
+`python3 main.py --dry-run`.
 
 ## Каналы
 
@@ -109,7 +111,8 @@ python3 main.py "твоя задача"
   `POST /webhook/github` принимает события GitHub (push/issues/PR).
 
 ## Слэш-команды (Telegram / TUI / HTTP)
-`/help`, `/mode [auto|suggest|full-auto]`, `/clear`, `/status`, `/provider`, `/skills`.
+`/help`, `/mode [auto|suggest|full-auto]`, `/clear`, `/status`, `/provider`, `/skills`,
+`/health`, `/audit [N]`.
 
 ## Навыки (skills) и MCP
 - Встроенные навыки: `git_commit`, `run_tests`, `tree`, `web_fetch`, `github`,

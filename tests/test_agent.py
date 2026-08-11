@@ -165,6 +165,14 @@ class TestCore(unittest.TestCase):
         agent.close()
         self.assertEqual(output, ["ok"])
 
+    def test_health_and_audit_commands(self):
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp()))
+        agent.audit.record("allow", "echo", {}, "ok")
+        self.assertIn("status: ok", agent.command("/health"))
+        self.assertIn("allow echo", agent.command("/audit 1"))
+        self.assertIn("используй", agent.command("/audit many"))
+        agent.close()
+
 
 class TestMemory(unittest.TestCase):
     def test_workspace_namespace_is_canonical_and_distinct(self):

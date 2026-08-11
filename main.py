@@ -9,7 +9,7 @@ from agent.channels import CLIChannel, TelegramChannel, Message, serve
 
 def _parse_args(argv):
     opts = {"config": None, "mode": None, "provider": None, "model": None,
-            "workspace": None, "port": None}
+            "workspace": None, "port": None, "dry_run": False}
     rest = []
     i = 0
     while i < len(argv):
@@ -26,6 +26,8 @@ def _parse_args(argv):
             opts["workspace"] = argv[i + 1]; i += 2; continue
         if a in ("-p", "--port"):
             opts["port"] = int(argv[i + 1]); i += 2; continue
+        if a == "--dry-run":
+            opts["dry_run"] = True; i += 1; continue
         rest.append(a); i += 1
     return opts, rest
 
@@ -61,6 +63,10 @@ def main():
 
     mcp_specs = os.environ.get("MCP_SERVERS")
     specs = mcp_specs.split("|") if mcp_specs else cfg.mcp_servers
+    if opts["dry_run"]:
+        print(agent.dry_run_report(specs))
+        agent.close()
+        return
     for spec in specs:
         spec = spec.strip()
         if not spec:

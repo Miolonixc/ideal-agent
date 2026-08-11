@@ -29,6 +29,16 @@ class AuditLog:
         )
         self.conn.commit()
 
+    def recent(self, limit: int = 10):
+        limit = max(1, min(int(limit), 50))
+        rows = self.conn.execute(
+            "SELECT ts, decision, tool, result FROM audit ORDER BY ts DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [
+            {"ts": ts, "decision": decision, "tool": tool, "result": result}
+            for ts, decision, tool, result in rows
+        ]
+
     def close(self):
         self.conn.close()
 
