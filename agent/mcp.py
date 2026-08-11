@@ -109,10 +109,11 @@ class MCPClient:
             pass
 
     def initialize(self):
+        from . import __version__
         return self._request(
             "initialize",
             {"protocolVersion": "2024-11-05", "capabilities": {},
-             "clientInfo": {"name": "ideal-agent", "version": "0.1"}},
+             "clientInfo": {"name": "ideal-agent", "version": __version__}},
         )
 
     def list_tools(self) -> List[dict]:

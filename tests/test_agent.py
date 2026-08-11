@@ -56,6 +56,11 @@ for line in sys.stdin:
 
 
 class TestConfig(unittest.TestCase):
+    def test_package_version_matches_project_metadata(self):
+        from agent import __version__
+        with open(os.path.join(os.path.dirname(__file__), "..", "pyproject.toml"), encoding="utf-8") as f:
+            self.assertIn(f'version = "{__version__}"', f.read())
+
     def test_env_key(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as f:
             json.dump({"llm": {"provider": "openai-compatible"}}, f)

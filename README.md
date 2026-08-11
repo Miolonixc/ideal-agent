@@ -3,6 +3,8 @@
 Провайдер-агностичный AI-агент для разработки (open-source, local-first). Собран из
 лучших практик Codex CLI, Claude Code, opencode, Hermes, Aider, Gemini CLI, Cline/Roo, Goose.
 
+Текущая версия: **0.2.0**. История изменений: [CHANGELOG.md](CHANGELOG.md).
+
 ## Возможности
 
 - **Провайдер-агностичность** — один LLM-интерфейс (`OpenAICompatible`); модель меняется в конфиге.

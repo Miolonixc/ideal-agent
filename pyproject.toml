@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ideal-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "Провайдер-агностичный AI-агент для разработки (open-source, local-first)"
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-ideal-agent = "agent.main:main"
+ideal-agent = "agent.cli:main"
 
 [tool.setuptools]
 packages = ["agent"]

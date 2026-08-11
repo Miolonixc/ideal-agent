@@ -298,11 +298,12 @@ class Agent:
 
     def health_report(self):
         """Local-only health information safe to show in any channel."""
+        from . import __version__
         workspace = os.path.expanduser(self.cfg.workspace)
         clients = getattr(self, "_mcp_clients", [])
         alive = sum(1 for client in clients if client.proc.poll() is None)
         return "\n".join((
-            "status: ok",
+            f"status: ok (ideal-agent v{__version__})",
             f"provider: {self.provider.__class__.__name__} / {self.provider.model}",
             f"workspace: {'ok' if os.path.isdir(workspace) else 'не найдена'} ({workspace})",
             f"tools: {len(self.registry._tools)}; skills: {len(self._loaded_skills)}",
@@ -312,10 +313,11 @@ class Agent:
 
     def dry_run_report(self, mcp_specs=None):
         """Report effective setup without contacting an LLM or starting MCP."""
+        from . import __version__
         mcp_specs = [str(spec) for spec in (mcp_specs or []) if str(spec).strip()]
         trusted = sorted(getattr(self.cfg, "trusted_extensions", []) or [])
         return "\n".join((
-            "dry-run: конфигурация прочитана; LLM, tools и MCP не запускались",
+            f"dry-run: ideal-agent v{__version__}; LLM, tools и MCP не запускались",
             f"provider: {self.provider.__class__.__name__} / {self.provider.model}",
             f"workspace: {os.path.expanduser(self.cfg.workspace)}",
             f"built-in tools: {len(self.registry._tools)}; discovered skills: {len(self._loaded_skills)}",
