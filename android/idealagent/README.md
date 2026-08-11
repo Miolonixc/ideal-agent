@@ -7,7 +7,8 @@
 стреляет запросы на `http://127.0.0.1:8080/message`.
 
 ## Сборка
-1. Открой папку `android/idealagent` в Android Studio (или `gradle build`).
+1. Открой папку `android/idealagent` в Android Studio (или `gradle build`). Версия
+   установлена в `app/build.gradle.kts` и отображается в настройках приложения.
 2. Gradle wrapper сгенерируется при первом открытии; либо `gradle wrapper`.
 3. Запусти на устройстве/эмуляторе (minSdk 24).
 

@@ -1170,6 +1170,15 @@ fun SettingsPanel(
             Text("Провайдер и API-ключ задаются только в конфиге сервера. Это не передаёт ключ LLM по сети.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp))
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                modifier = Modifier.padding(top = 14.dp, bottom = 8.dp),
+            )
+            Text(
+                "Версия приложения: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

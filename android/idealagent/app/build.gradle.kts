@@ -11,8 +11,8 @@ android {
         applicationId = "com.idealagent"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.2.6"
+        versionCode = 9
+        versionName = "0.2.7"
     }
 
     signingConfigs {
