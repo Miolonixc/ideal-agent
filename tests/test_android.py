@@ -24,3 +24,4 @@ class TestAndroidCompanion(unittest.TestCase):
         self.assertIn("onClick = { if (busy) cancelStreaming() else send() }", activity)
         self.assertIn("enum class ConnectionState", activity)
         self.assertIn("Состояние: $stateText", activity)
+        self.assertIn("Проверить подключение", activity)

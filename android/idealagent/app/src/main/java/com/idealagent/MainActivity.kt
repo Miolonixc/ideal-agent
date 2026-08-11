@@ -77,6 +77,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -815,6 +816,7 @@ fun ChatScreen() {
                     host = host, onHost = { host = it },
                     accessToken = accessToken, onAccessToken = { accessToken = it },
                     connectionState = connectionState,
+                    onCheckConnection = { fetchStatus(host, accessToken) },
                 )
             }
 
@@ -1193,6 +1195,7 @@ fun SettingsPanel(
     host: String, onHost: (String) -> Unit,
     accessToken: String, onAccessToken: (String) -> Unit,
     connectionState: ConnectionState,
+    onCheckConnection: () -> Unit,
 ) {
     var showToken by remember { mutableStateOf(false) }
 
@@ -1221,6 +1224,13 @@ fun SettingsPanel(
                 color = stateColor,
                 modifier = Modifier.padding(top = 6.dp),
             )
+            Button(
+                onClick = onCheckConnection,
+                enabled = connectionState != ConnectionState.Connecting,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Text(if (connectionState == ConnectionState.Connecting) "Проверяем…" else "Проверить подключение")
+            }
             OutlinedTextField(
                 value = host, onValueChange = onHost,
                 label = { Text("Хост:порт агента") },
