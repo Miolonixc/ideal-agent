@@ -12,6 +12,7 @@ class TestOpenTUI(unittest.TestCase):
             package = json.load(f)
         self.assertEqual(package["dependencies"]["@opentui/core"], "0.4.5")
         self.assertEqual(package["devDependencies"]["typescript"], "5.7.3")
+        self.assertEqual(package["devDependencies"]["@types/node"], "22.15.3")
         with open(os.path.join(root, "src", "index.ts"), encoding="utf-8") as f:
             source = f.read()
         self.assertIn("/message/stream", source)

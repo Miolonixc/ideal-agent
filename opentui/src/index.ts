@@ -6,7 +6,6 @@
 import {
   Box,
   InputRenderable,
-  InputRenderableEvents,
   TextRenderable,
   createCliRenderer,
 } from "@opentui/core"
@@ -44,10 +43,12 @@ const status = new TextRenderable(renderer, {
 const transcript = new TextRenderable(renderer, {
   id: "transcript", content: "", fg: "#f3f4f6",
 })
-const input = new InputRenderable(renderer, {
+let input: InputRenderable
+input = new InputRenderable(renderer, {
   id: "prompt", width: "100%", placeholder: "Сообщение агенту — Enter отправить · Ctrl+C выход",
   backgroundColor: "#1f2937", focusedBackgroundColor: "#273449",
   textColor: "#ffffff", cursorColor: "#6ee7ff", maxLength: 20_000,
+  onSubmit: () => void send(input.value),
 })
 
 root.add(title)
@@ -130,6 +131,5 @@ async function send(text: string) {
   }
 }
 
-input.on(InputRenderableEvents.ENTER, (value: string) => void send(value))
 input.focus()
 await checkServer()
