@@ -19,6 +19,5 @@ class TestSbom(unittest.TestCase):
             with open(output, encoding="utf-8") as f:
                 sbom = json.load(f)
         self.assertEqual(sbom["bomFormat"], "CycloneDX")
-        self.assertEqual(sbom["metadata"]["component"]["version"], "0.2.7")
+        self.assertEqual(sbom["metadata"]["component"]["version"], "0.2.8-dev")
         self.assertTrue(any(c["name"] == "activity-compose" for c in sbom["components"]))
-

@@ -132,7 +132,12 @@ python3 main.py "твоя задача"
   Каждый — папка `skills/<name>/` с `SKILL.md` и `run.sh`/`run.py`.
   Аргументы передаются через env `IDEAL_SKILL_INPUT` (JSON).
 - MCP-серверы (stdio JSON-RPC): `fs_mcp.py` (чтение файлов), `fetch_mcp.py`
-  (загрузка веба), `github_mcp.py` (issues/repos). Подключаются через `mcp_servers`.
+  (загрузка веба), `github_mcp.py` (issues/repos). Для нового подключения
+  используй manifest в `mcp_servers`: `{"name":"fs_mcp.py","command":"python3",
+  "args":["mcp/fs_mcp.py"],"permissions":["filesystem"]}`. `shell`
+  добавляется автоматически, поскольку запуск MCP — выполнение процесса. В TUI
+  первое подключение выводит запрос доверия с capabilities и сохраняет выбор.
+  Строковый старый формат остаётся совместимым, но запрашивает только `shell`.
 - Внешние MCP-серверы подключаются так же (любой stdio-MCP совместимый процесс).
 
 ## Потоковые ответы (streaming)

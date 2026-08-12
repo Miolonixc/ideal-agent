@@ -80,12 +80,16 @@ issue-комментарий через навык `github`).
 
 ## Подписанный APK для релиза
 
-Workflow `Android release` запускается при теге `v*` или вручную и публикует
+Workflow `Android release` запускается при теге `v*` и публикует
 release APK, SHA-256 и SBOM. Перед первым запуском нужно добавить в GitHub
 Secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Первый секрет — base64-кодировка
 файла keystore. Без всех четырёх секретов workflow пропускает выпуск: debug-key
 для релиза намеренно не используется.
+
+Тег обязан иметь формат `vX.Y.Z` (например, `v0.2.8`). Он становится
+`versionName`; из него детерминированно вычисляется монотонный Android
+`versionCode`. Локальная debug-сборка показывает `0.2.8-dev`.
 
 ## Что можно добавить
 - История диалогов в приложении (агент уже хранит `history`).

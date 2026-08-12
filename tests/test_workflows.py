@@ -20,3 +20,5 @@ class TestWorkflows(unittest.TestCase):
         self.assertIn("ANDROID_KEYSTORE_BASE64", workflow)
         self.assertIn("assembleRelease", workflow)
         self.assertIn("action-gh-release", workflow)
+        self.assertIn("GITHUB_REF_NAME", workflow)
+        self.assertIn("IDEAL_APP_VERSION_NAME", workflow)

@@ -163,20 +163,57 @@ class Agent:
         callback = self.extension_approval_callback
         return bool(callback and callback(kind, name, permissions))
 
-    def connect_mcp(self, command, args=None):
-        from .mcp import MCPClient
+    def mcp_spec(self, spec):
+        """Validate a declarative MCP manifest without starting its process."""
+        if isinstance(spec, str):
+            import shlex
+            parts = shlex.split(spec)
+            if not parts:
+                raise ValueError("пустая MCP-спецификация")
+            command, args, name, permissions = parts[0], parts[1:], None, ["shell"]
+        elif isinstance(spec, dict):
+            command = str(spec.get("command") or "").strip()
+            raw_args = spec.get("args", [])
+            if not command or not isinstance(raw_args, list) or not all(isinstance(x, str) for x in raw_args):
+                raise ValueError("MCP manifest требует command и строковый массив args")
+            args = raw_args
+            name = str(spec.get("name") or "").strip() or None
+            permissions = spec.get("permissions", [])
+            if not isinstance(permissions, list) or not permissions or not all(isinstance(p, str) for p in permissions):
+                raise ValueError("MCP manifest требует непустой массив permissions")
+        else:
+            raise ValueError("MCP manifest должен быть строкой или объектом")
+        server_name = name or self._mcp_name(command, args)
+        # Starting any stdio server is executable code, therefore shell is an
+        # unavoidable capability even when the server advertises no other one.
+        requested = sorted(set(permissions) | {"shell"})
+        return command, args, server_name, requested
+
+    @staticmethod
+    def _mcp_name(command, args):
         server_name = Path(command).name
-        if args:
-            for arg in args:
-                if str(arg).endswith((".py", ".sh", ".js", ".mjs")):
-                    server_name = Path(arg).name
-                    break
-        allowed = set(getattr(self.cfg, "trusted_extensions", []) or [])
-        if "mcp:*" not in allowed and f"mcp:{server_name}" not in allowed:
-            raise PermissionError(
-                f"MCP '{server_name}' не отмечен доверенным; добавь 'mcp:{server_name}' "
-                "в trusted_extensions конфига."
-            )
+        for arg in args or []:
+            if str(arg).endswith((".py", ".sh", ".js", ".mjs")):
+                return Path(arg).name
+        return server_name
+
+    def connect_mcp_spec(self, spec):
+        command, args, name, permissions = self.mcp_spec(spec)
+        return self.connect_mcp(command, args, name=name, permissions=permissions)
+
+    def connect_mcp(self, command, args=None, *, name=None, permissions=None):
+        from .mcp import MCPClient
+        server_name = name or self._mcp_name(command, args)
+        requested = sorted(set(permissions or ["shell"]) | {"shell"})
+        trusted, allowed = self.extension_policy("mcp", server_name)
+        if not trusted or not set(requested).issubset(allowed):
+            if self._request_extension_approval("mcp", server_name, requested):
+                trusted, allowed = self.extension_policy("mcp", server_name)
+            if not trusted or not set(requested).issubset(allowed):
+                missing = sorted(set(requested) - set(allowed))
+                raise PermissionError(
+                    f"MCP '{server_name}' требует доверия и capabilities: {', '.join(missing or requested)}"
+                )
         client = MCPClient(command, args)
         client.initialize()
         tools = client.list_tools()

@@ -11,8 +11,12 @@ android {
         applicationId = "com.idealagent"
         minSdk = 24
         targetSdk = 34
-        versionCode = 9
-        versionName = "0.2.7"
+        // Release workflow overrides these from vX.Y.Z git tags. Local/debug
+        // builds remain installable upgrades while clearly marked as dev.
+        versionCode = 2008
+        versionName = "0.2.8-dev"
+        providers.environmentVariable("IDEAL_APP_VERSION_CODE").orNull?.toIntOrNull()?.let { versionCode = it }
+        providers.environmentVariable("IDEAL_APP_VERSION_NAME").orNull?.let { versionName = it }
     }
 
     signingConfigs {

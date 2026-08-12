@@ -15,7 +15,7 @@ class TestAndroidCompanion(unittest.TestCase):
         code = int(re.search(r"versionCode\s*=\s*(\d+)", gradle).group(1))
         name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle).group(1)
         self.assertGreaterEqual(code, 9)
-        self.assertEqual(name, "0.2.7")
+        self.assertEqual(name, "0.2.8-dev")
         self.assertIn("buildConfig = true", gradle)
         with open(os.path.join(ROOT, "app", "src", "main", "java", "com", "idealagent", "MainActivity.kt"), encoding="utf-8") as f:
             activity = f.read()
@@ -29,3 +29,5 @@ class TestAndroidCompanion(unittest.TestCase):
         self.assertIn("Светлая тема", activity)
         self.assertIn("Switch(checked = lightTheme", activity)
         self.assertIn("Остановить генерацию", activity)
+        self.assertIn("IDEAL_APP_VERSION_NAME", gradle)
+        self.assertIn("IDEAL_APP_VERSION_CODE", gradle)

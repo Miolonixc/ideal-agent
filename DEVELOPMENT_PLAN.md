@@ -34,20 +34,22 @@
 
 ## P2 — следующий цикл
 
-1. Распространить capabilities и first-run approval на MCP (сейчас MCP требует
-   ручного доверия до старта процесса).
+1. MCP manifest capabilities и first-run approval в TUI — выполнено. MCP не
+   стартует до согласия; string-конфиг сохранён для обратной совместимости.
 2. Android: Compose UI, светлая тема и accessibility. Реальные сетевые тесты
    остаются задачей на физическом устройстве/эмуляторе с запущенным агентом.
 3. Локальные метрики без записи промптов, вложений и ключей (опционально).
 
 ## P3 — выпуск
 
-1. `CHANGELOG.md`, versionCode/versionName от git-тега и release notes.
-2. Подписанный release APK через GitHub Secrets, SHA-256 и SBOM.
+1. `CHANGELOG.md`, versionCode/versionName от git-тега и release notes —
+   выполнено для Android release workflow.
+2. Подписанный release APK через GitHub Secrets, SHA-256 и SBOM — workflow
+   готов; остаётся добавить четыре секрета подписи в настройках репозитория.
 
 ## Рекомендуемый порядок
 
-1. `feat: MCP capability manifest and TUI approval`
+1. `feat: MCP capability manifest and TUI approval` — выполнено.
 2. `feat(android): accessibility, light theme and network tests` — выполнено
    для UI; сетевой smoke-test требует реального Android runtime.
 3. `feat: privacy-preserving local metrics` — выполнено.

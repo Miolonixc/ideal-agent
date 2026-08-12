@@ -56,14 +56,13 @@ def main():
     specs = mcp_specs.split("|") if mcp_specs else cfg.mcp_servers
     if opts["dry_run"]:
         print(agent.dry_run_report(specs)); agent.close(); return
-    for spec in specs:
-        spec = spec.strip()
-        if not spec: continue
-        parts = spec.split()
-        try:
-            agent.connect_mcp(parts[0], parts[1:]); print("mcp:", parts[0])
-        except (PermissionError, ValueError) as e:
-            print("mcp пропущен:", e)
+    if sub != "tui":
+        for spec in specs:
+            if not spec: continue
+            try:
+                agent.connect_mcp_spec(spec); print("mcp:", spec)
+            except (PermissionError, ValueError) as e:
+                print("mcp пропущен:", e)
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN") or (getattr(cfg, "telegram", None) or {}).get("token")
     if sub == "tui":

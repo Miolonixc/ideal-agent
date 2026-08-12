@@ -91,7 +91,7 @@ def save_runtime_settings(cfg, path=None):
     llm = data.setdefault("llm", {})
     for key in ("provider", "base_url", "model", "temperature", "timeout", "max_tokens", "retries"):
         llm[key] = getattr(cfg.llm, key)
-    for key in ("mode", "workspace", "sandbox_mode", "context_budget", "skills_dir", "use_context", "trusted_extensions", "extension_permissions"):
+    for key in ("mode", "workspace", "sandbox_mode", "context_budget", "skills_dir", "mcp_servers", "use_context", "trusted_extensions", "extension_permissions"):
         data[key] = getattr(cfg, key)
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)

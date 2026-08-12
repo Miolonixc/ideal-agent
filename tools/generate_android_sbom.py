@@ -33,10 +33,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gradle", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--version", help="effective app version (for tagged release builds)")
     args = parser.parse_args()
     text = args.gradle.read_text(encoding="utf-8")
     app_id = re.search(r'applicationId\s*=\s*"([^"]+)"', text).group(1)
-    version = re.search(r'versionName\s*=\s*"([^"]+)"', text).group(1)
+    version = args.version or re.search(r'versionName\s*=\s*"([^"]+)"', text).group(1)
     app = {"type": "application", "name": app_id, "version": version,
            "purl": f"pkg:generic/{app_id}@{version}"}
     bom = {

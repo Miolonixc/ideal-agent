@@ -342,8 +342,36 @@ class TestSkills(unittest.TestCase):
 class TestMCP(unittest.TestCase):
     def test_agent_requires_explicit_mcp_trust(self):
         agent = Agent(AgentConfig(workspace=tempfile.mkdtemp()))
-        with self.assertRaisesRegex(PermissionError, "не отмечен доверенным"):
+        with self.assertRaisesRegex(PermissionError, "требует доверия"):
             agent.connect_mcp("python3", ["mock.py"])
+        agent.close()
+
+    def test_mcp_manifest_is_approved_before_process_starts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = os.path.join(tmp, "safe.py")
+            with open(server, "w") as f:
+                f.write(MOCK_MCP)
+            cfg = AgentConfig(workspace=tmp)
+            agent = Agent(cfg)
+            asked = []
+            def approve(kind, name, permissions):
+                asked.append((kind, name, permissions))
+                agent.approve_extension(kind, name, permissions)
+                return True
+            agent.extension_approval_callback = approve
+            names = agent.connect_mcp_spec({
+                "name": "safe", "command": "python3", "args": [server],
+                "permissions": ["filesystem"],
+            })
+            self.assertEqual(names, ["mcp_safe_echo"])
+            self.assertEqual(asked, [("mcp", "safe", ["filesystem", "shell"])])
+            self.assertIn("mcp:safe", cfg.trusted_extensions)
+            agent.close()
+
+    def test_mcp_manifest_requires_capabilities(self):
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp()))
+        with self.assertRaisesRegex(ValueError, "permissions"):
+            agent.mcp_spec({"command": "python3", "args": []})
         agent.close()
 
     def test_client(self):

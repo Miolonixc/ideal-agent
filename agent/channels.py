@@ -344,6 +344,15 @@ class TUIChannel(Channel):
             return True
 
         agent.extension_approval_callback = request_extension_approval
+        # MCP processes are started only after the local TUI installed its
+        # confirmation callback.  This makes first-run approval possible and
+        # prevents a configured server from executing before the user agrees.
+        for spec in getattr(agent.cfg, "mcp_servers", []) or []:
+            try:
+                names = agent.connect_mcp_spec(spec)
+                self.lines.append("system> MCP подключён: " + ", ".join(names))
+            except (PermissionError, ValueError, OSError, RuntimeError) as exc:
+                self.lines.append(f"system> MCP не подключён: {exc}")
 
         def edit_setting():
             nonlocal settings_idx
