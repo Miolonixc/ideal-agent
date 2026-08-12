@@ -78,6 +78,15 @@ issue-комментарий через навык `github`).
   или положи HTTP за nginx + basic-auth / mTLS.
 - Ключи (LLM, GitHub, Telegram) хранятся в `config.json`/`~/.config/ideal-agent`.
 
+## Подписанный APK для релиза
+
+Workflow `Android release` запускается при теге `v*` или вручную и публикует
+release APK, SHA-256 и SBOM. Перед первым запуском нужно добавить в GitHub
+Secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Первый секрет — base64-кодировка
+файла keystore. Без всех четырёх секретов workflow пропускает выпуск: debug-key
+для релиза намеренно не используется.
+
 ## Что можно добавить
 - История диалогов в приложении (агент уже хранит `history`).
 - Стриминг ответов (HTTP-канал можно расширить SSE).

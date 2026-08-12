@@ -93,6 +93,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -110,6 +111,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -151,9 +154,25 @@ import java.util.UUID
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ChatScreen() }
+        setContent { IdealAgentTheme { ChatScreen() } }
     }
 }
+
+@Composable
+fun IdealAgentTheme(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("ideal_agent", Context.MODE_PRIVATE) }
+    var lightTheme by remember { mutableStateOf(prefs.getBoolean("light_theme", true)) }
+    val colors = if (lightTheme) androidx.compose.material3.lightColorScheme() else androidx.compose.material3.darkColorScheme()
+    MaterialTheme(colorScheme = colors) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalThemeSetter provides { light ->
+            lightTheme = light
+            prefs.edit().putBoolean("light_theme", light).apply()
+        }) { content() }
+    }
+}
+
+private val LocalThemeSetter = androidx.compose.runtime.staticCompositionLocalOf<(Boolean) -> Unit> { {} }
 
 data class Message(val role: String, val text: String)
 
@@ -510,6 +529,8 @@ fun ChatScreen() {
     var ttsOn by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val setLightTheme = LocalThemeSetter.current
+    var lightTheme by remember { mutableStateOf(prefs.getBoolean("light_theme", true)) }
 
     val sessions = remember {
         mutableStateListOf<Session>().apply {
@@ -817,6 +838,8 @@ fun ChatScreen() {
                     accessToken = accessToken, onAccessToken = { accessToken = it },
                     connectionState = connectionState,
                     onCheckConnection = { fetchStatus(host, accessToken) },
+                    lightTheme = lightTheme,
+                    onLightTheme = { lightTheme = it; setLightTheme(it) },
                 )
             }
 
@@ -975,7 +998,13 @@ fun ChatScreen() {
                             modifier = Modifier.size(48.dp),
                         ) {
                             if (busy) {
-                                Text("■", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "■",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.semantics {
+                                        contentDescription = "Остановить генерацию"
+                                    },
+                                )
                             } else {
                                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить")
                             }
@@ -1196,6 +1225,8 @@ fun SettingsPanel(
     accessToken: String, onAccessToken: (String) -> Unit,
     connectionState: ConnectionState,
     onCheckConnection: () -> Unit,
+    lightTheme: Boolean,
+    onLightTheme: (Boolean) -> Unit,
 ) {
     var showToken by remember { mutableStateOf(false) }
 
@@ -1230,6 +1261,18 @@ fun SettingsPanel(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             ) {
                 Text(if (connectionState == ConnectionState.Connecting) "Проверяем…" else "Проверить подключение")
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Светлая тема", style = MaterialTheme.typography.bodyLarge)
+                    Text("Высокий контраст при дневном освещении", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = lightTheme, onCheckedChange = onLightTheme)
             }
             OutlinedTextField(
                 value = host, onValueChange = onHost,

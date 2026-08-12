@@ -22,11 +22,21 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        create("release") {
+            val store = providers.environmentVariable("IDEAL_RELEASE_STORE_FILE").orNull
+            if (store != null) {
+                storeFile = file(store)
+                storePassword = providers.environmentVariable("IDEAL_RELEASE_STORE_PASSWORD").orNull
+                keyAlias = providers.environmentVariable("IDEAL_RELEASE_KEY_ALIAS").orNull
+                keyPassword = providers.environmentVariable("IDEAL_RELEASE_KEY_PASSWORD").orNull
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             signingConfig = signingConfigs.getByName("debug")

@@ -25,3 +25,7 @@ class TestAndroidCompanion(unittest.TestCase):
         self.assertIn("enum class ConnectionState", activity)
         self.assertIn("Состояние: $stateText", activity)
         self.assertIn("Проверить подключение", activity)
+        self.assertIn("fun IdealAgentTheme", activity)
+        self.assertIn("Светлая тема", activity)
+        self.assertIn("Switch(checked = lightTheme", activity)
+        self.assertIn("Остановить генерацию", activity)

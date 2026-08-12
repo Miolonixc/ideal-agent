@@ -17,6 +17,9 @@
   "trusted_extensions": [],
   "extension_permissions": [],
   "use_context": true,
+  "metrics": {
+    "enabled": false
+  },
   "http": {
     "host": "127.0.0.1",
     "token": "change-this-to-a-long-random-token",

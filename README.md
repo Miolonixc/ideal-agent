@@ -116,7 +116,15 @@ python3 main.py "твоя задача"
 
 ## Слэш-команды (Telegram / TUI / HTTP)
 `/help`, `/mode [auto|suggest|full-auto]`, `/clear`, `/status`, `/provider`, `/skills`,
-`/health`, `/audit [N]`.
+`/health`, `/metrics`, `/audit [N]`.
+
+## Локальные метрики (необязательно)
+
+По умолчанию метрики выключены. Если добавить в `config.json` `"metrics":
+{"enabled": true}`, агент запишет в локальную SQLite-базу только суммарные
+счётчики запросов, ответов, ошибок и лимитов итераций. Промпты, ответы,
+вложения, ключи, аргументы tools, ID сессий и сетевые данные не сохраняются и
+никуда не отправляются. Посмотреть счётчики можно командой `/metrics`.
 
 ## Навыки (skills) и MCP
 - Встроенные навыки: `git_commit`, `run_tests`, `tree`, `web_fetch`, `github`,

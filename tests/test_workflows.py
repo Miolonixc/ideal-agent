@@ -13,3 +13,10 @@ class TestWorkflows(unittest.TestCase):
         self.assertIn("sha256sum *.apk", workflow)
         self.assertIn("*.sha256", workflow)
 
+    def test_android_release_requires_signing_secrets(self):
+        path = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", "android-release.yml")
+        with open(path, encoding="utf-8") as f:
+            workflow = f.read()
+        self.assertIn("ANDROID_KEYSTORE_BASE64", workflow)
+        self.assertIn("assembleRelease", workflow)
+        self.assertIn("action-gh-release", workflow)

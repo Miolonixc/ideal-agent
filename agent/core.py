@@ -100,6 +100,11 @@ class Agent:
         self.registry = registry or ToolRegistry()
         self.gate = safety.ApprovalGate(cfg.mode, cfg.allow, cfg.deny)
         self.audit = safety.AuditLog()
+        metrics_cfg = getattr(cfg, "metrics", None) or {}
+        self.metrics = None
+        if metrics_cfg.get("enabled"):
+            from .metrics import MetricsStore
+            self.metrics = MetricsStore(metrics_cfg.get("path"))
         self.repo_index = None
         self.memory = None
         self._context_ready = False
@@ -212,7 +217,7 @@ class Agent:
                 client.close()
             except Exception:
                 pass
-        for resource in (self.repo_index, self.memory, self.audit):
+        for resource in (self.repo_index, self.memory, self.audit, self.metrics):
             if resource is not None:
                 try:
                     resource.close()
@@ -284,6 +289,7 @@ class Agent:
                 "/skills — список доступных навыков и тулов\n"
                 "/provider — текущий провайдер/модель\n"
                 "/health — локальная диагностика без сетевого запроса\n"
+                "/metrics — локальные агрегатные метрики (если включены)\n"
                 "/audit [N] — последние N записей выполнения tools"
             )
         if cmd == "mode":
@@ -305,6 +311,15 @@ class Agent:
             return "навыки и тулы: " + ", ".join(names)
         if cmd == "health":
             return self.health_report()
+        if cmd == "metrics":
+            if not self.metrics:
+                return "локальные метрики выключены (metrics.enabled: true в config.json)"
+            rows = self.metrics.summary()
+            if not rows:
+                return "локальные метрики пока пусты"
+            return "локальные метрики (без промптов и вложений): " + ", ".join(
+                f"{event}={count}" for event, count in rows.items()
+            )
         if cmd == "audit":
             try:
                 limit = int(arg) if arg else 10
@@ -406,23 +421,30 @@ class Agent:
         return {"role": "user", "content": parts}
 
     def run(self, text, attachments=None):
-        self.history.add(self._build_user_message(text, attachments))
-        self._ensure_context()
-        self._inject_context(text)
-        for _ in range(MAX_ITER):
-            resp = self.provider.complete(
-                self.history.messages, tools=self.registry.schema(), stream=False
-            )
-            msg = resp["choices"][0]["message"]
-            tool_calls = self._extract_tool_calls(msg)
-            if tool_calls:
-                self._handle_tools(msg, tool_calls)
-                continue
-            reply = msg.get("content") or ""
-            self.history.add({"role": "assistant", "content": reply})
-            self.history.compact()
-            return reply
-        return "[достигнут лимит итераций]"
+        self._record_metric("requests")
+        try:
+            self.history.add(self._build_user_message(text, attachments))
+            self._ensure_context()
+            self._inject_context(text)
+            for _ in range(MAX_ITER):
+                resp = self.provider.complete(
+                    self.history.messages, tools=self.registry.schema(), stream=False
+                )
+                msg = resp["choices"][0]["message"]
+                tool_calls = self._extract_tool_calls(msg)
+                if tool_calls:
+                    self._handle_tools(msg, tool_calls)
+                    continue
+                reply = msg.get("content") or ""
+                self.history.add({"role": "assistant", "content": reply})
+                self.history.compact()
+                self._record_metric("replies")
+                return reply
+            self._record_metric("iteration_limits")
+            return "[достигнут лимит итераций]"
+        except Exception:
+            self._record_metric("errors")
+            raise
 
     def run_in_session(self, session_id, text, attachments=None):
         """Keep mutable history and provider state isolated between HTTP requests."""
@@ -432,6 +454,15 @@ class Agent:
 
     def stream(self, text, attachments=None):
         """Генератор: yield куски ответа по мере генерации (streaming)."""
+        self._record_metric("requests")
+        try:
+            yield from self._stream_impl(text, attachments)
+        except Exception:
+            self._record_metric("errors")
+            raise
+
+    def _stream_impl(self, text, attachments=None):
+        """Streaming implementation, separated so failures are counted once."""
         self.history.add(self._build_user_message(text, attachments))
         self._ensure_context()
         self._inject_context(text)
@@ -459,6 +490,7 @@ class Agent:
                     continue
                 self.history.add({"role": "assistant", "content": content})
                 self.history.compact()
+                self._record_metric("replies")
                 return
             # fallback: без потоковой генерации — отдаём весь ответ целиком
             resp = self.provider.complete(
@@ -472,9 +504,15 @@ class Agent:
             reply = msg.get("content") or ""
             self.history.add({"role": "assistant", "content": reply})
             self.history.compact()
+            self._record_metric("replies")
             yield reply
             return
+        self._record_metric("iteration_limits")
         yield "[достигнут лимит итераций]"
+
+    def _record_metric(self, event):
+        if self.metrics:
+            self.metrics.record(event)
 
     def stream_in_session(self, session_id, text, attachments=None):
         with self._run_lock:

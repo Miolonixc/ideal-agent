@@ -39,6 +39,8 @@ class AgentConfig:
     telegram: Optional[dict] = None
     http: Optional[dict] = None
     ide: Optional[dict] = None
+    # Disabled by default. When enabled, stores aggregate local counters only.
+    metrics: Optional[dict] = None
 
 
 def _read_file(path):

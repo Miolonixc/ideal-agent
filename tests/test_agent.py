@@ -139,6 +139,20 @@ class TestLLM(unittest.TestCase):
 
 
 class TestCore(unittest.TestCase):
+    def test_opt_in_metrics_are_aggregate_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            db_path = os.path.join(d, "metrics.db")
+            cfg = AgentConfig(workspace=d, metrics={"enabled": True, "path": db_path})
+            agent = Agent(cfg)
+            agent.provider = fake_provider_sequence([
+                {"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
+            ])
+            self.assertEqual(agent.run("secret prompt", attachments=[]), "ok")
+            self.assertEqual(agent.metrics.summary(), {"replies": 1, "requests": 1})
+            agent.close()
+            with open(db_path, "rb") as f:
+                self.assertNotIn(b"secret prompt", f.read())
+
     def test_tool_loop(self):
         seq = [
             {"choices": [{"message": {"role": "assistant", "content": None,
