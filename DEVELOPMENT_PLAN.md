@@ -26,14 +26,18 @@
   встроенные инструменты.
 - MCP ограничивает размер входящего JSON-RPC сообщения (256 KiB), отменяет
   запрос при таймауте и аварийно завершает сервер, нарушивший лимит.
+- Skills поддерживают manifest capabilities `filesystem`, `network`, `shell`,
+  `secrets`; TUI запрашивает и сохраняет подтверждение первого запуска.
+- Android-компаньон показывает версию и состояние соединения, умеет проверить
+  сервер и отменить streaming; CI публикует APK, SHA-256 и declared-dependencies SBOM.
+- Диагностика `/health`, `/audit` и `--dry-run` доступна без LLM-запроса.
 
 ## P2 — следующий цикл
 
-1. Развить manifest skills/MCP до отдельных разрешений `filesystem`, `network`,
-   `shell`, `secrets` и добавить интерактивное подтверждение первого запуска.
-2. Android: состояния offline/connecting/connected/error, отмена streaming,
-   Compose UI и сетевые тесты, светлая тема и accessibility.
-3. Команды `/audit`, `/health` и `--dry-run` для диагностики и безопасного preview.
+1. Распространить capabilities и first-run approval на MCP (сейчас MCP требует
+   ручного доверия до старта процесса).
+2. Android: Compose UI и реальные сетевые тесты, светлая тема и accessibility.
+3. Локальные метрики без записи промптов, вложений и ключей (опционально).
 
 ## P3 — выпуск
 
@@ -43,6 +47,6 @@
 
 ## Рекомендуемый порядок
 
-1. `feat: detailed extension permissions and first-run approval`
-2. `feat: add diagnostics commands and dry-run`
-3. `feat(android): connection state, cancellation and UI tests`
+1. `feat: MCP capability manifest and TUI approval`
+2. `feat(android): accessibility, light theme and network tests`
+3. `feat: privacy-preserving local metrics`

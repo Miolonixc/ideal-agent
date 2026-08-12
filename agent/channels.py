@@ -323,6 +323,28 @@ class TUIChannel(Channel):
             except Exception as exc:
                 return f"Не удалось сохранить: {exc}"
 
+        def request_extension_approval(kind, name, permissions):
+            """Only the local curses UI may turn a blocked extension into trusted."""
+            try:
+                inp.erase(); inp.box()
+                capability_text = ", ".join(permissions) or "без дополнительных"
+                inp.addstr(0, 2, _clip_terminal_text(f" Доверить {kind}:{name}: {capability_text}? [y/N] ", w - 4), c(3) | curses.A_BOLD)
+                inp.addstr(1, 2, "> ", c(2)); inp.move(1, 4)
+                curses.echo()
+                answer = inp.getstr(1, 4, max(1, w - 6)).decode("utf-8").strip().lower()
+                curses.noecho()
+            except Exception:
+                return False
+            if answer not in ("y", "yes", "д", "да"):
+                self.lines.append(f"system> Доверие {kind}:{name} отклонено")
+                return False
+            agent.approve_extension(kind, name, permissions)
+            self.lines.append("system> " + save_settings())
+            self.lines.append(f"system> Доверено: {kind}:{name} ({', '.join(permissions) or 'без capabilities'})")
+            return True
+
+        agent.extension_approval_callback = request_extension_approval
+
         def edit_setting():
             nonlocal settings_idx
             label, key = settings[settings_idx]

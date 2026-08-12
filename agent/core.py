@@ -105,6 +105,7 @@ class Agent:
         self._context_ready = False
         self._closed = False
         self._loaded_skills = []
+        self.extension_approval_callback = None
         self._register_defaults()
 
     def _register_defaults(self):
@@ -131,8 +132,31 @@ class Agent:
             self.registry, skills_dir,
             trusted_extensions=getattr(self.cfg, "trusted_extensions", []),
             allowed_permissions=getattr(self.cfg, "extension_permissions", []),
+            policy_getter=self.extension_policy,
+            approval_callback=self._request_extension_approval,
         )
         return self._loaded_skills
+
+    def extension_policy(self, kind, name):
+        allowed = set(getattr(self.cfg, "trusted_extensions", []) or [])
+        trusted = f"{kind}:*" in allowed or f"{kind}:{name}" in allowed
+        return trusted, set(getattr(self.cfg, "extension_permissions", []) or [])
+
+    def approve_extension(self, kind, name, permissions):
+        identifier = f"{kind}:{name}"
+        trusted = list(getattr(self.cfg, "trusted_extensions", []) or [])
+        if identifier not in trusted:
+            trusted.append(identifier)
+        allowed = list(getattr(self.cfg, "extension_permissions", []) or [])
+        for permission in permissions:
+            if permission not in allowed:
+                allowed.append(permission)
+        self.cfg.trusted_extensions = trusted
+        self.cfg.extension_permissions = allowed
+
+    def _request_extension_approval(self, kind, name, permissions):
+        callback = self.extension_approval_callback
+        return bool(callback and callback(kind, name, permissions))
 
     def connect_mcp(self, command, args=None):
         from .mcp import MCPClient

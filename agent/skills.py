@@ -49,7 +49,7 @@ def manifest_permissions(value, has_script: bool) -> List[str]:
 
 
 def load_skills(registry, skills_dir: str, trusted_extensions=None,
-                allowed_permissions=None) -> List[str]:
+                allowed_permissions=None, policy_getter=None, approval_callback=None) -> List[str]:
     if not os.path.isdir(skills_dir):
         return []
     # Direct library callers retain the historic unrestricted behaviour;
@@ -65,15 +65,27 @@ def load_skills(registry, skills_dir: str, trusted_extensions=None,
         sname = meta.get("name", name)
         sdesc = meta.get("description", desc) or name
         script = _find_script(skill_dir)
-        trusted = trusted_extensions is None or _is_trusted(trusted_extensions, "skill", sname)
         required_permissions = manifest_permissions(meta.get("permissions"), bool(script))
 
-        def make_handler(script, skill_dir, desc, trusted, sname, required_permissions):
+        def make_handler(script, skill_dir, desc, sname, required_permissions):
             def handler(args):
-                if script and not trusted:
+                if policy_getter:
+                    trusted_now, permissions_now = policy_getter("skill", sname)
+                else:
+                    trusted_now = trusted_extensions is None or _is_trusted(trusted_extensions, "skill", sname)
+                    permissions_now = allowed_permissions
+                missing = sorted(set(required_permissions) - set(permissions_now or []))
+                if script and (not trusted_now or missing) and approval_callback:
+                    if approval_callback("skill", sname, required_permissions):
+                        if policy_getter:
+                            trusted_now, permissions_now = policy_getter("skill", sname)
+                        else:
+                            trusted_now = trusted_extensions is None or _is_trusted(trusted_extensions, "skill", sname)
+                            permissions_now = allowed_permissions
+                        missing = sorted(set(required_permissions) - set(permissions_now or []))
+                if script and not trusted_now:
                     return (f"заблокировано: skill '{sname}' не отмечен доверенным. "
                             f"Добавь 'skill:{sname}' в trusted_extensions конфига.")
-                missing = sorted(set(required_permissions) - set(allowed_permissions or []))
                 if missing:
                     return (f"заблокировано: skill '{sname}' требует разрешения "
                             f"{', '.join(missing)}. Добавь их в extension_permissions конфига.")
@@ -96,7 +108,7 @@ def load_skills(registry, skills_dir: str, trusted_extensions=None,
             sdesc,
             {"type": "object", "properties": {"input": {"type": "string"}},
              "required": []},
-            make_handler(script, skill_dir, desc, trusted, sname, required_permissions),
+            make_handler(script, skill_dir, desc, sname, required_permissions),
             source="skill",
         )
         loaded.append(sname)

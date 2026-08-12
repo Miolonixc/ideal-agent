@@ -301,6 +301,29 @@ class TestSkills(unittest.TestCase):
                         allowed_permissions=["shell", "filesystem", "network"])
             self.assertEqual(reg.call("skill_checked", "{}"), "ok\n")
 
+    def test_skill_can_be_approved_at_first_use(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sd = os.path.join(tmp, "skills", "confirm")
+            os.makedirs(sd)
+            with open(os.path.join(sd, "SKILL.md"), "w") as f:
+                f.write("---\nname: confirm\npermissions: filesystem\n---\n")
+            with open(os.path.join(sd, "run.sh"), "w") as f:
+                f.write("#!/bin/sh\necho confirmed\n")
+            os.chmod(os.path.join(sd, "run.sh"), 0o755)
+            cfg = AgentConfig(workspace=tmp)
+            agent = Agent(cfg)
+            asked = []
+            def approve(kind, name, permissions):
+                asked.append((kind, name, permissions))
+                agent.approve_extension(kind, name, permissions)
+                return True
+            agent.extension_approval_callback = approve
+            agent.load_skills_dir(os.path.join(tmp, "skills"))
+            self.assertEqual(agent.registry.call("skill_confirm", "{}"), "confirmed\n")
+            self.assertEqual(asked, [("skill", "confirm", ["filesystem", "shell"])])
+            self.assertIn("skill:confirm", cfg.trusted_extensions)
+            self.assertEqual(set(cfg.extension_permissions), {"filesystem", "shell"})
+
 
 class TestMCP(unittest.TestCase):
     def test_agent_requires_explicit_mcp_trust(self):
