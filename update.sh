@@ -79,7 +79,7 @@ if [ "$CHECK_ONLY" = 1 ]; then
 fi
 
 say "Обновляю код"
-for item in main.py agent skills mcp_servers docs tests config.example.json README.md pyproject.toml install.sh update.sh; do
+for item in main.py agent skills mcp_servers opentui docs tests config.example.json README.md pyproject.toml install.sh update.sh; do
     [ -e "$CLONE_DIR/$item" ] && cp -R "$CLONE_DIR/$item" "$DEST/"
 done
 printf '%s\n' "$REMOTE_REVISION" > "$DEST/.ideal-agent-revision"

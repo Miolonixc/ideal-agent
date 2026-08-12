@@ -106,6 +106,10 @@ python3 main.py "твоя задача"
   `/about` показывает версию. Вложения: `/attach ПУТЬ`, `/files`, `/detach N` и
   `/screenshot`; текст и изображения передаются в LLM, прочие файлы доступны как
   путь для tools. Режим апрува берётся из конфига.
+- **OpenTUI (экспериментально)** — компонентный интерфейс поверх того же
+  локального HTTP API: `IDEAL_HTTP_TOKEN=... python3 main.py opentui`. Нужен
+  Bun и `cd opentui && bun install`; при его отсутствии используй стабильный
+  `python3 main.py tui`. Подробнее: [opentui/README.md](opentui/README.md).
 - **Telegram** — `python3 main.py telegram` (токен из env `TELEGRAM_BOT_TOKEN` или
   `telegram.token` в конфиге; белый список `ALLOWED_USER_IDS`/`telegram.allowed`).
   Поддерживаются слэш-команды (см. ниже).

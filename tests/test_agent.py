@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import io
 import os
+import sys
 import tempfile
 import threading
 import unittest
@@ -400,6 +401,15 @@ class TestMCP(unittest.TestCase):
 
 
 class TestChannels(unittest.TestCase):
+    def test_opentui_cli_requires_bun_without_starting_server(self):
+        from agent import cli
+        with mock.patch.object(sys, "argv", ["ideal-agent", "opentui"]), \
+             mock.patch("agent.cli.load", return_value=AgentConfig(workspace=tempfile.mkdtemp())), \
+             mock.patch("agent.cli.shutil.which", return_value=None), \
+             mock.patch("builtins.print") as printed:
+            cli.main()
+        self.assertIn("OpenTUI требует Bun", printed.call_args.args[0])
+
     def test_cli(self):
         from agent.channels import CLIChannel, Message
         c = CLIChannel()

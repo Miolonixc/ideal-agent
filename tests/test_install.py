@@ -31,6 +31,12 @@ class TestInstaller(unittest.TestCase):
         self.assertIn("--check", out)
         self.assertIn("--no-restart", out)
 
+    def test_install_and_update_include_optional_opentui_client(self):
+        root = os.path.dirname(os.path.dirname(__file__))
+        for script in ("install.sh", "update.sh"):
+            with open(os.path.join(root, script), encoding="utf-8") as f:
+                self.assertIn("opentui", f.read())
+
 
 if __name__ == "__main__":
     unittest.main()

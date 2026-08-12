@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import sys
+import threading
 
 from .channels import CLIChannel, TelegramChannel, serve
 from .config import load
@@ -35,7 +38,7 @@ def _parse_args(argv):
 
 def main():
     opts, rest = _parse_args(sys.argv[1:])
-    if rest and rest[0] in ("cli", "tui", "ide", "http", "telegram"):
+    if rest and rest[0] in ("cli", "tui", "opentui", "ide", "http", "telegram"):
         sub, extra = rest[0], rest[1:]
     else:
         sub, extra = None, rest
@@ -56,7 +59,7 @@ def main():
     specs = mcp_specs.split("|") if mcp_specs else cfg.mcp_servers
     if opts["dry_run"]:
         print(agent.dry_run_report(specs)); agent.close(); return
-    if sub != "tui":
+    if sub not in ("tui", "opentui"):
         for spec in specs:
             if not spec: continue
             try:
@@ -69,6 +72,37 @@ def main():
         from .channels import TUIChannel
         try: TUIChannel().run_session(agent)
         finally: agent.close()
+        return
+    if sub == "opentui":
+        bun = shutil.which("bun")
+        client = os.path.join(os.path.dirname(os.path.dirname(__file__)), "opentui", "src", "index.ts")
+        if not bun:
+            print("OpenTUI требует Bun. Установи Bun, либо используй: python3 main.py tui")
+            agent.close()
+            return
+        if not os.path.exists(client):
+            print("OpenTUI client не найден; используй: python3 main.py tui")
+            agent.close()
+            return
+        from .channels import HTTPChannel
+        http_cfg = getattr(cfg, "http", None) or {}
+        port = opts["port"] or int(os.environ.get("IDEAL_HTTP_PORT", "8080"))
+        host = os.environ.get("IDEAL_HTTP_HOST", http_cfg.get("host", "127.0.0.1"))
+        http_token = os.environ.get("IDEAL_HTTP_TOKEN", http_cfg.get("token", ""))
+        if host not in ("127.0.0.1", "::1", "localhost"):
+            print("OpenTUI запускает локальный HTTP-сервер; для внешнего доступа используй отдельный http-режим с токеном.")
+            agent.close()
+            return
+        server = HTTPChannel(host=host, port=port, token=http_token)
+        threading.Thread(target=server.run, args=(agent,), daemon=True).start()
+        env = os.environ.copy()
+        env["IDEAL_AGENT_URL"] = f"http://{host}:{port}"
+        if http_token:
+            env["IDEAL_HTTP_TOKEN"] = http_token
+        try:
+            subprocess.run([bun, "run", client], env=env, check=False)
+        finally:
+            agent.close()
         return
     if sub == "ide":
         from .channels import SocketChannel

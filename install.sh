@@ -113,7 +113,7 @@ note "Python: $($PYBIN -V 2>&1)"
 
 say "Копирую файлы"
 mkdir -p "$DEST"
-for item in main.py agent skills mcp_servers docs tests config.example.json README.md pyproject.toml install.sh update.sh; do
+for item in main.py agent skills mcp_servers opentui docs tests config.example.json README.md pyproject.toml install.sh update.sh; do
     [ -e "$SRC/$item" ] && cp -R "$SRC/$item" "$DEST/"
 done
 chmod +x "$DEST/install.sh" "$DEST/update.sh" "$DEST"/skills/*/run.sh 2>/dev/null || true

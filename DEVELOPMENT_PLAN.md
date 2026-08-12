@@ -55,3 +55,5 @@
 3. `feat: privacy-preserving local metrics` — выполнено.
 4. `ci: signed Android release via GitHub Secrets` — workflow подготовлен;
    владелец репозитория добавляет четыре секрета подписи.
+5. `feat: experimental OpenTUI frontend` — выполнено; нужна ручная проверка
+   на Termux с Bun и поддерживаемым native renderer, curses остаётся fallback.
