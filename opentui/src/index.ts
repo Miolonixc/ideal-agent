@@ -6,6 +6,7 @@
 import {
   Box,
   InputRenderable,
+  ScrollBoxRenderable,
   TextRenderable,
   createCliRenderer,
 } from "@opentui/core"
@@ -43,6 +44,11 @@ const status = new TextRenderable(renderer, {
 const transcript = new TextRenderable(renderer, {
   id: "transcript", content: "", fg: "#f3f4f6",
 })
+const transcriptPane = new ScrollBoxRenderable(renderer, {
+  id: "transcript-pane", flexGrow: 1, width: "100%", scrollY: true,
+  stickyScroll: true, stickyStart: "bottom", border: true, borderStyle: "rounded",
+  borderColor: "#374151", paddingX: 1, paddingY: 0,
+})
 let input: InputRenderable
 input = new InputRenderable(renderer, {
   id: "prompt", width: "100%", placeholder: "Сообщение агенту — Enter отправить · Ctrl+C выход",
@@ -54,8 +60,9 @@ input = new InputRenderable(renderer, {
 root.add(title)
 root.add(status)
 root.add(Box({ height: 1 }))
-root.add(transcript)
-root.add(Box({ flexGrow: 1 }))
+transcriptPane.add(transcript)
+root.add(transcriptPane)
+root.add(Box({ height: 1 }))
 root.add(input)
 renderer.root.add(root)
 
@@ -79,12 +86,18 @@ async function checkServer() {
   try {
     const response = await request("/status")
     if (!response.ok) throw new Error(response.status === 401 ? "неверный HTTP-токен" : `HTTP ${response.status}`)
-    const data = await response.json() as { provider?: string; model?: string; mode?: string }
+    const data = await response.json() as { provider?: string; model?: string; mode?: string; tools?: number }
     setStatus(`online · ${data.provider ?? "agent"}/${data.model ?? "?"} · ${data.mode ?? "?"}`, "#86efac")
+    return data
   } catch (error) {
     setStatus(`offline · ${error instanceof Error ? error.message : String(error)}`, "#fca5a5")
     add("system", "Запусти агент: python3 main.py http --port 8080. Curses TUI остаётся доступен: python3 main.py tui")
   }
+}
+
+async function showServerInfo() {
+  const data = await checkServer()
+  if (data) add("system", `Подключено · tools: ${data.tools ?? 0} · F3: список skills/tools · Ctrl+L: очистить историю`)
 }
 
 async function send(text: string) {
@@ -132,4 +145,14 @@ async function send(text: string) {
 }
 
 input.focus()
-await checkServer()
+renderer.keyInput.on("keypress", (key) => {
+  if (busy) return
+  if (key.name === "f2") void showServerInfo()
+  if (key.name === "f3") void send("/skills")
+  if (key.ctrl && key.name === "l") {
+    lines = []
+    redraw()
+    add("system", "История OpenTUI очищена")
+  }
+})
+await showServerInfo()

@@ -17,6 +17,8 @@ class TestOpenTUI(unittest.TestCase):
             source = f.read()
         self.assertIn("/message/stream", source)
         self.assertIn("X-Ideal-Agent-Token", source)
+        self.assertIn("ScrollBoxRenderable", source)
+        self.assertIn('key.name === "f3"', source)
         self.assertNotIn("api_key", source.lower())
 
     def test_opentui_has_a_bun_typecheck_workflow(self):

@@ -22,3 +22,9 @@ IDEAL_HTTP_TOKEN=... python3 main.py opentui
 
 OpenTUI needs Bun because it loads a native Zig renderer. If the runtime or
 native binary is unavailable on a device, use `python3 main.py tui` instead.
+
+## Управление
+
+`Enter` отправляет сообщение, `F2` повторно проверяет сервер и показывает
+сводку, `F3` выводит skills/tools, `Ctrl+L` очищает локальное окно истории.
+История прокручивается и удерживается внизу во время streaming-ответа.
