@@ -152,6 +152,15 @@ class Agent:
         with self._cancellation_lock:
             return len(self._stream_cancellations)
 
+    def session_count(self):
+        """Return the number of cached conversations without exposing their data."""
+        with self._run_lock:
+            return len(self._sessions)
+
+    @staticmethod
+    def session_limit():
+        return MAX_SESSIONS
+
     def load_skills_dir(self, skills_dir):
         from .skills import load_skills
         self._loaded_skills = load_skills(
@@ -408,7 +417,7 @@ class Agent:
             f"workspace: {'ok' if os.path.isdir(workspace) else 'не найдена'} ({workspace})",
             f"tools: {len(self.registry._tools)}; skills: {len(self._loaded_skills)}",
             f"mcp: {alive}/{len(clients)} запущено",
-            f"sessions: {len(self._sessions)}/{MAX_SESSIONS}; streams: {self.active_streams()}",
+            f"sessions: {self.session_count()}/{MAX_SESSIONS}; streams: {self.active_streams()}",
             f"mode: {self.gate.mode}; sandbox: {self.cfg.sandbox_mode}",
         ))
 

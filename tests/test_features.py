@@ -147,6 +147,9 @@ class TestHTTPChannel(unittest.TestCase):
             base + "/", headers={"X-Ideal-Agent-Token": "test-token"}
         ), timeout=5).read())
         self.assertTrue(status["ok"])
+        self.assertEqual(status["sessions"], 0)
+        self.assertEqual(status["session_limit"], 32)
+        self.assertEqual(status["active_streams"], 0)
         req = urllib.request.Request(
             base + "/message",
             data=json.dumps({"text": "привет"}).encode(),
@@ -154,6 +157,10 @@ class TestHTTPChannel(unittest.TestCase):
         )
         res = json.loads(urllib.request.urlopen(req, timeout=10).read())
         self.assertEqual(res["reply"], "ok")
+        status = json.loads(urllib.request.urlopen(urllib.request.Request(
+            base + "/status", headers={"X-Ideal-Agent-Token": "test-token"}
+        ), timeout=5).read())
+        self.assertEqual(status["sessions"], 1)
 
 
 class TestStream(unittest.TestCase):

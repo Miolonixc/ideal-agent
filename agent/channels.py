@@ -876,6 +876,9 @@ class HTTPChannel(Channel):
                         "model": bot._agent.provider.model,
                         "mode": bot._agent.gate.mode,
                         "tools": len(bot._agent.registry._tools),
+                        "sessions": bot._agent.session_count(),
+                        "session_limit": bot._agent.session_limit(),
+                        "active_streams": bot._agent.active_streams(),
                     })
                 else:
                     self._send(404, {"ok": False, "error": "not found"})
