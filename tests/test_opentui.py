@@ -19,6 +19,9 @@ class TestOpenTUI(unittest.TestCase):
         self.assertIn("X-Ideal-Agent-Token", source)
         self.assertIn("ScrollBoxRenderable", source)
         self.assertIn('key.name === "f3"', source)
+        self.assertIn('text.startsWith("/attach ")', source)
+        self.assertIn("attachments: sentAttachments", source)
+        self.assertIn("MAX_ATTACHMENT_BYTES", source)
         self.assertNotIn("api_key", source.lower())
 
     def test_opentui_has_a_bun_typecheck_workflow(self):

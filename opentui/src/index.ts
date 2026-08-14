@@ -10,8 +10,15 @@ import {
   TextRenderable,
   createCliRenderer,
 } from "@opentui/core"
+import { readFile, stat } from "node:fs/promises"
+import { basename, extname } from "node:path"
 
 type Config = { baseUrl: string; token: string; sessionId: string }
+type Attachment = { name: string; mime: string; data: string }
+
+const MAX_ATTACHMENTS = 5
+// Base64 expands data, while the HTTP channel limits full JSON body to 12 MiB.
+const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024
 
 function option(name: string, fallback: string): string {
   const index = process.argv.indexOf(name)
@@ -54,7 +61,7 @@ input = new InputRenderable(renderer, {
   id: "prompt", width: "100%", placeholder: "Сообщение агенту — Enter отправить · Ctrl+C выход",
   backgroundColor: "#1f2937", focusedBackgroundColor: "#273449",
   textColor: "#ffffff", cursorColor: "#6ee7ff", maxLength: 20_000,
-  onSubmit: () => void send(input.value),
+  onSubmit: () => submit(input.value),
 })
 
 root.add(title)
@@ -68,6 +75,7 @@ renderer.root.add(root)
 
 let lines: string[] = []
 let busy = false
+let attachments: Attachment[] = []
 function redraw() {
   // Keep the in-memory transcript bounded; OpenTUI handles terminal wrapping.
   transcript.content = lines.slice(-120).join("\n\n")
@@ -80,6 +88,55 @@ function add(role: "you" | "agent" | "system", text: string) {
 function setStatus(text: string, color = "#9ca3af") {
   status.content = text
   status.fg = color
+}
+
+function attachmentMime(path: string): string {
+  const extension = extname(path).toLowerCase()
+  const known: Record<string, string> = {
+    ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
+    ".csv": "text/csv", ".py": "text/x-python", ".ts": "text/typescript",
+    ".js": "text/javascript", ".kt": "text/x-kotlin", ".java": "text/x-java",
+    ".sh": "text/x-shellscript", ".yml": "text/yaml", ".yaml": "text/yaml",
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".gif": "image/gif",
+  }
+  return known[extension] ?? "application/octet-stream"
+}
+
+async function attach(path: string) {
+  if (!path) return add("system", "Используй: /attach ПУТЬ")
+  if (attachments.length >= MAX_ATTACHMENTS) return add("system", `Можно прикрепить не более ${MAX_ATTACHMENTS} файлов`)
+  try {
+    const info = await stat(path)
+    if (!info.isFile()) throw new Error("это не файл")
+    if (info.size > MAX_ATTACHMENT_BYTES) throw new Error("файл больше 6 MiB")
+    const raw = await readFile(path)
+    attachments.push({ name: basename(path), mime: attachmentMime(path), data: raw.toString("base64") })
+    add("system", `Прикреплён: ${basename(path)} (${Math.ceil(info.size / 1024)} KiB)`)
+  } catch (error) {
+    add("system", `Не удалось прикрепить: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+function listAttachments() {
+  add("system", attachments.length ? `Вложения: ${attachments.map((file, i) => `${i + 1}. ${file.name}`).join(" · ")}` : "Вложений нет")
+}
+
+function detach(index: string) {
+  const position = Number(index) - 1
+  if (!Number.isInteger(position) || position < 0 || position >= attachments.length) {
+    return add("system", "Используй: /detach НОМЕР")
+  }
+  const [removed] = attachments.splice(position, 1)
+  add("system", `Откреплён: ${removed.name}`)
+}
+
+function submit(value: string) {
+  const text = value.trim()
+  if (text.startsWith("/attach ")) { input.value = ""; void attach(text.slice(8).trim()); return }
+  if (text === "/files") { input.value = ""; listAttachments(); return }
+  if (text.startsWith("/detach ")) { input.value = ""; detach(text.slice(8).trim()); return }
+  void send(value)
 }
 
 async function checkServer() {
@@ -101,9 +158,10 @@ async function showServerInfo() {
 }
 
 async function send(text: string) {
-  if (!text.trim() || busy) return
+  if ((!text.trim() && !attachments.length) || busy) return
   busy = true
-  add("you", text)
+  const sentAttachments = attachments
+  add("you", text || `[вложения: ${sentAttachments.map((file) => file.name).join(", ")}]`)
   input.value = ""
   setStatus("agent отвечает…", "#fde68a")
   let answer = ""
@@ -112,7 +170,7 @@ async function send(text: string) {
     const response = await request("/message/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, session_id: config.sessionId }),
+      body: JSON.stringify({ text, session_id: config.sessionId, attachments: sentAttachments }),
     })
     if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
     const reader = response.body.getReader()
@@ -134,6 +192,7 @@ async function send(text: string) {
       }
     }
     setStatus("online", "#86efac")
+    attachments = []
   } catch (error) {
     lines[lines.length - 1] = `agent> [ошибка] ${error instanceof Error ? error.message : String(error)}`
     redraw()
