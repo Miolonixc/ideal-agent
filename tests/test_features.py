@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sys
 import json
+import tempfile
 import threading
 import unittest
 import urllib.request
@@ -100,6 +101,12 @@ class TestGitHubWebhook(unittest.TestCase):
 
 
 class TestHTTPChannel(unittest.TestCase):
+    def test_session_id_validation(self):
+        self.assertEqual(HTTPChannel._session_id({}), "default")
+        self.assertEqual(HTTPChannel._session_id({"session_id": "android:chat-1"}), "android:chat-1")
+        self.assertIsNone(HTTPChannel._session_id({"session_id": "../escape"}))
+        self.assertIsNone(HTTPChannel._session_id({"session_id": "x" * 129}))
+
     def test_rate_limiter(self):
         ch = HTTPChannel(token="token")
         ch.rate_limit = 2
@@ -150,6 +157,35 @@ class TestHTTPChannel(unittest.TestCase):
 
 
 class TestStream(unittest.TestCase):
+    def test_stream_session_can_be_cancelled_and_is_cleaned_up(self):
+        class StreamP:
+            model = "fake"
+            def count_tokens(self, text): return len(text)
+            def stream_completion(self, messages, tools=None):
+                yield ("content", "первая часть")
+                yield ("content", "вторая часть")
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), mode="full-auto", use_context=False)
+        agent = Agent(cfg)
+        agent.provider = StreamP()
+        stream = agent.stream_in_session("cancel-test", "привет")
+        self.assertEqual(next(stream), "первая часть")
+        self.assertTrue(agent.cancel_session("cancel-test"))
+        self.assertEqual(list(stream), [])
+        self.assertFalse(agent.cancel_session("cancel-test"))
+        self.assertIn("отменена", agent._sessions["cancel-test"].messages[-1]["content"])
+        agent.close()
+
+    def test_session_history_has_a_bounded_lru_cache(self):
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), use_context=False)
+        agent = Agent(cfg)
+        for number in range(40):
+            agent._session_id = f"session-{number}"
+            agent.history.add({"role": "user", "content": "x"})
+        self.assertEqual(len(agent._sessions), 32)
+        self.assertNotIn("session-0", agent._sessions)
+        self.assertIn("session-39", agent._sessions)
+        agent.close()
+
     def test_fallback_stream(self):
         import tempfile
         cfg = AgentConfig(workspace=tempfile.mkdtemp(), mode="full-auto")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import base64
+from collections import OrderedDict
 import json
 import os
 import re
@@ -19,6 +20,7 @@ from .tools import ToolRegistry
 MAX_ITER = 12
 MAX_INLINE_ATTACHMENT_BYTES = 512 * 1024
 MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024
+MAX_SESSIONS = 32
 
 
 def _safe_tool_part(value: str) -> str:
@@ -94,9 +96,11 @@ class Agent:
     def __init__(self, cfg, registry=None):
         self.cfg = cfg
         self.provider = llm_mod.get_provider(cfg.llm)
-        self._sessions: Dict[str, HistoryManager] = {}
+        self._sessions: OrderedDict[str, HistoryManager] = OrderedDict()
         self._session_id = "default"
         self._run_lock = threading.RLock()
+        self._cancellation_lock = threading.Lock()
+        self._stream_cancellations: Dict[str, threading.Event] = {}
         self.registry = registry or ToolRegistry()
         self.gate = safety.ApprovalGate(cfg.mode, cfg.allow, cfg.deny)
         self.audit = safety.AuditLog()
@@ -127,9 +131,26 @@ class Agent:
     def history(self):
         h = self._sessions.get(self._session_id)
         if h is None:
+            if len(self._sessions) >= MAX_SESSIONS:
+                self._sessions.popitem(last=False)
             h = HistoryManager(self.provider, budget=getattr(self.cfg, "context_budget", 6000))
             self._sessions[self._session_id] = h
+        else:
+            self._sessions.move_to_end(self._session_id)
         return h
+
+    def cancel_session(self, session_id):
+        """Request cooperative cancellation of an active streaming session."""
+        with self._cancellation_lock:
+            event = self._stream_cancellations.get(session_id)
+        if not event:
+            return False
+        event.set()
+        return True
+
+    def active_streams(self):
+        with self._cancellation_lock:
+            return len(self._stream_cancellations)
 
     def load_skills_dir(self, skills_dir):
         from .skills import load_skills
@@ -249,6 +270,9 @@ class Agent:
         if self._closed:
             return
         self._closed = True
+        with self._cancellation_lock:
+            for event in self._stream_cancellations.values():
+                event.set()
         for client in self._mcp_clients:
             try:
                 client.close()
@@ -384,6 +408,7 @@ class Agent:
             f"workspace: {'ok' if os.path.isdir(workspace) else 'не найдена'} ({workspace})",
             f"tools: {len(self.registry._tools)}; skills: {len(self._loaded_skills)}",
             f"mcp: {alive}/{len(clients)} запущено",
+            f"sessions: {len(self._sessions)}/{MAX_SESSIONS}; streams: {self.active_streams()}",
             f"mode: {self.gate.mode}; sandbox: {self.cfg.sandbox_mode}",
         ))
 
@@ -489,21 +514,23 @@ class Agent:
             self._session_id = session_id or "default"
             return self.run(text, attachments)
 
-    def stream(self, text, attachments=None):
+    def stream(self, text, attachments=None, cancel_event=None):
         """Генератор: yield куски ответа по мере генерации (streaming)."""
         self._record_metric("requests")
         try:
-            yield from self._stream_impl(text, attachments)
+            yield from self._stream_impl(text, attachments, cancel_event)
         except Exception:
             self._record_metric("errors")
             raise
 
-    def _stream_impl(self, text, attachments=None):
+    def _stream_impl(self, text, attachments=None, cancel_event=None):
         """Streaming implementation, separated so failures are counted once."""
         self.history.add(self._build_user_message(text, attachments))
         self._ensure_context()
         self._inject_context(text)
         for _ in range(MAX_ITER):
+            if self._stream_cancelled(cancel_event):
+                return
             if hasattr(self.provider, "stream_completion"):
                 content = ""
                 saw_tool = False
@@ -511,6 +538,8 @@ class Agent:
                 for kind, data in self.provider.stream_completion(
                     self.history.messages, self.registry.schema()
                 ):
+                    if self._stream_cancelled(cancel_event):
+                        return
                     if kind == "content":
                         content += data
                         yield data
@@ -533,6 +562,8 @@ class Agent:
             resp = self.provider.complete(
                 self.history.messages, tools=self.registry.schema(), stream=False
             )
+            if self._stream_cancelled(cancel_event):
+                return
             msg = resp["choices"][0]["message"]
             tool_calls = self._extract_tool_calls(msg)
             if tool_calls:
@@ -547,11 +578,28 @@ class Agent:
         self._record_metric("iteration_limits")
         yield "[достигнут лимит итераций]"
 
+    def _stream_cancelled(self, cancel_event):
+        if not cancel_event or not cancel_event.is_set():
+            return False
+        self.history.add({"role": "assistant", "content": "[генерация отменена пользователем]"})
+        self.history.compact()
+        self._record_metric("cancelled")
+        return True
+
     def _record_metric(self, event):
         if self.metrics:
             self.metrics.record(event)
 
     def stream_in_session(self, session_id, text, attachments=None):
+        session_id = session_id or "default"
         with self._run_lock:
-            self._session_id = session_id or "default"
-            yield from self.stream(text, attachments)
+            cancellation = threading.Event()
+            with self._cancellation_lock:
+                self._stream_cancellations[session_id] = cancellation
+            try:
+                self._session_id = session_id
+                yield from self.stream(text, attachments, cancel_event=cancellation)
+            finally:
+                with self._cancellation_lock:
+                    if self._stream_cancellations.get(session_id) is cancellation:
+                        self._stream_cancellations.pop(session_id, None)

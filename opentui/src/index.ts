@@ -157,6 +157,17 @@ async function showServerInfo() {
   if (data) add("system", `Подключено · tools: ${data.tools ?? 0} · F3: список skills/tools · Ctrl+L: очистить историю`)
 }
 
+async function cancelActiveStream() {
+  try {
+    const response = await request(`/sessions/${encodeURIComponent(config.sessionId)}/cancel`, { method: "POST" })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const result = await response.json() as { cancelled?: boolean }
+    setStatus(result.cancelled ? "отмена запрошена…" : "нет активного ответа", "#fde68a")
+  } catch (error) {
+    setStatus(`не удалось отменить: ${error instanceof Error ? error.message : String(error)}`, "#fca5a5")
+  }
+}
+
 async function send(text: string) {
   if ((!text.trim() && !attachments.length) || busy) return
   busy = true
@@ -205,6 +216,7 @@ async function send(text: string) {
 
 input.focus()
 renderer.keyInput.on("keypress", (key) => {
+  if (key.name === "f4") { void cancelActiveStream(); return }
   if (busy) return
   if (key.name === "f2") void showServerInfo()
   if (key.name === "f3") void send("/skills")

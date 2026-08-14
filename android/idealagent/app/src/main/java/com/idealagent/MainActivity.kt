@@ -522,6 +522,7 @@ fun ChatScreen() {
     var connectionState by remember { mutableStateOf(ConnectionState.Offline) }
     var requestJob by remember { mutableStateOf<Job?>(null) }
     var streamCancellation by remember { mutableStateOf<StreamCancellation?>(null) }
+    var activeStreamSession by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
     val attachments = remember { mutableStateListOf<Attachment>() }
     var attachMenu by remember { mutableStateOf(false) }
@@ -638,6 +639,9 @@ fun ChatScreen() {
         saveSessions(context, sessions)
     }
     fun cancelStreaming() {
+        activeStreamSession?.let { sessionId ->
+            scope.launch { cancelAgentStream(host, accessToken, sessionId) }
+        }
         streamCancellation?.cancel()
         requestJob?.cancel()
     }
@@ -719,6 +723,7 @@ fun ChatScreen() {
         busy = true
         connectionState = ConnectionState.Connecting
         streamCancellation = cancellation
+        activeStreamSession = requestSessionId
         requestJob = scope.launch {
             try {
                 val reply = askAgentStream(h, p, token, atts, requestSessionId, cancellation) { chunk ->
@@ -735,6 +740,7 @@ fun ChatScreen() {
                 }
             }
             finally {
+                if (activeStreamSession == requestSessionId) activeStreamSession = null
                 if (currentId == requestSessionId) {
                     val reply = messages.getOrNull(agentIdx)?.text ?: ""
                     if (reply.isBlank()) {
@@ -1313,6 +1319,25 @@ fun SettingsPanel(
             )
         }
     }
+}
+
+/** Best-effort server-side cancellation; local disconnect remains a fallback. */
+suspend fun cancelAgentStream(host: String, accessToken: String, sessionId: String) = withContext(Dispatchers.IO) {
+    try {
+        val url = URL("${agentBaseUrl(host)}/sessions/${java.net.URLEncoder.encode(sessionId, "UTF-8")}/cancel")
+            val conn = url.openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.connectTimeout = 5_000
+            conn.readTimeout = 5_000
+            if (accessToken.isNotBlank()) conn.setRequestProperty("X-Ideal-Agent-Token", accessToken)
+            conn.outputStream.use { }
+            conn.inputStream.close()
+        } finally {
+            conn.disconnect()
+        }
+    } catch (_: Exception) { }
 }
 
 suspend fun askAgent(host: String, prompt: String, accessToken: String, attachments: List<Attachment> = emptyList(), sessionId: String = "default"): String {

@@ -5,6 +5,7 @@ import hmac
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -719,6 +720,8 @@ class HTTPChannel(Channel):
     MAX_ATTACHMENTS = 5
     MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
     MAX_TEXT_CHARS = 64 * 1024
+    MAX_SESSION_ID_CHARS = 128
+    _SESSION_ID_RE = re.compile(r"[A-Za-z0-9_.:-]+")
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8080,
                  token: str = "", github_webhook_secret: str = ""):
@@ -796,6 +799,19 @@ class HTTPChannel(Channel):
             shutil.rmtree(d, ignore_errors=True)
             return None, None
         return out, d
+
+    @classmethod
+    def _session_id(cls, data):
+        """Return a bounded, transport-safe session ID or ``None`` if invalid."""
+        value = data.get("session_id", "default")
+        if value is None:
+            value = "default"
+        if not isinstance(value, str):
+            return None
+        value = value.strip() or "default"
+        if len(value) > cls.MAX_SESSION_ID_CHARS or not cls._SESSION_ID_RE.fullmatch(value):
+            return None
+        return value
 
     @staticmethod
     def _cleanup_attachments(directory):
@@ -882,13 +898,22 @@ class HTTPChannel(Channel):
                 if not bot._allow_request(self._rate_key()):
                     self._rate_limited()
                     return
+                cancel_match = re.fullmatch(r"/sessions/([A-Za-z0-9_.:-]{1,128})/cancel", urllib.parse.urlparse(self.path).path)
+                if cancel_match:
+                    session_id = cancel_match.group(1)
+                    self._send(200, {"ok": True, "cancelled": bot._agent.cancel_session(session_id)})
+                    return
                 if self.path == "/message":
                     text = (data.get("text") or "").strip()
                     if len(text) > HTTPChannel.MAX_TEXT_CHARS:
                         self._send(413, {"ok": False, "error": "text too large"})
                         return
                     attachments, attachment_dir = HTTPChannel._prepare_attachments(data)
-                    session_id = data.get("session_id") or "default"
+                    session_id = bot._session_id(data)
+                    if session_id is None:
+                        HTTPChannel._cleanup_attachments(attachment_dir)
+                        self._send(400, {"ok": False, "error": "invalid session_id"})
+                        return
                     if not text and not attachments:
                         HTTPChannel._cleanup_attachments(attachment_dir)
                         self._send(400, {"ok": False, "error": "empty text"})
@@ -929,7 +954,11 @@ class HTTPChannel(Channel):
                         self._send(413, {"ok": False, "error": "text too large"})
                         return
                     attachments, attachment_dir = HTTPChannel._prepare_attachments(data)
-                    session_id = data.get("session_id") or "default"
+                    session_id = bot._session_id(data)
+                    if session_id is None:
+                        HTTPChannel._cleanup_attachments(attachment_dir)
+                        self._send(400, {"ok": False, "error": "invalid session_id"})
+                        return
                     if not text and not attachments:
                         HTTPChannel._cleanup_attachments(attachment_dir)
                         self._send(400, {"ok": False, "error": "empty text"})

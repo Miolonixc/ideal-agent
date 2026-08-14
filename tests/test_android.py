@@ -22,6 +22,8 @@ class TestAndroidCompanion(unittest.TestCase):
         self.assertIn("Версия приложения: ${BuildConfig.VERSION_NAME}", activity)
         self.assertIn("class StreamCancellation", activity)
         self.assertIn("onClick = { if (busy) cancelStreaming() else send() }", activity)
+        self.assertIn("cancelAgentStream(host, accessToken, sessionId)", activity)
+        self.assertIn("/sessions/${java.net.URLEncoder.encode(sessionId, \"UTF-8\")}/cancel", activity)
         self.assertIn("enum class ConnectionState", activity)
         self.assertIn("Состояние: $stateText", activity)
         self.assertIn("Проверить подключение", activity)

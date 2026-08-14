@@ -116,6 +116,7 @@ python3 main.py "твоя задача"
 - **IDE** — `python3 main.py ide` (TCP `127.0.0.1:8765`, JSON-строки `{"text":"..."}`).
 - **HTTP** — `python3 main.py http --port 8080` (для Android-компаньона и вебхуков):
   `GET /` статус, `POST /message` `{"text":...}`→`{"reply":...}`,
+  `POST /sessions/<session_id>/cancel` отменяет активный streaming-запрос;
   `POST /webhook/github` принимает события GitHub (push/issues/PR).
 
 ## Слэш-команды (Telegram / TUI / HTTP)
