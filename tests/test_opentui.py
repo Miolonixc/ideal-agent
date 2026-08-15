@@ -20,6 +20,8 @@ class TestOpenTUI(unittest.TestCase):
         self.assertIn("ScrollBoxRenderable", source)
         self.assertIn('key.name === "f3"', source)
         self.assertIn("/sessions/${encodeURIComponent(config.sessionId)}/cancel", source)
+        self.assertIn("method: \"DELETE\"", source)
+        self.assertIn("clearConversation", source)
         self.assertIn('text.startsWith("/attach ")', source)
         self.assertIn("attachments: sentAttachments", source)
         self.assertIn("MAX_ATTACHMENT_BYTES", source)

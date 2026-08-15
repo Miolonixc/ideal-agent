@@ -645,6 +645,9 @@ fun ChatScreen() {
         streamCancellation?.cancel()
         requestJob?.cancel()
     }
+    fun clearRemoteSession(sessionId: String) {
+        scope.launch { clearAgentSession(host, accessToken, sessionId) }
+    }
     fun createNewSession() {
         cancelStreaming()
         syncCurrent()
@@ -656,6 +659,7 @@ fun ChatScreen() {
         val idx = sessions.indexOfFirst { it.id == id }
         if (idx < 0) return
         if (currentId == id) cancelStreaming()
+        clearRemoteSession(id)
         sessions.removeAt(idx)
         if (sessions.isEmpty()) sessions.add(Session(UUID.randomUUID().toString(), "Чат 1", mutableListOf()))
         if (currentId == id) currentId = sessions.first().id
@@ -697,7 +701,7 @@ fun ChatScreen() {
         val trimmed = p.trim()
         if (trimmed.startsWith("/")) {
             when (trimmed) {
-                "/clear" -> { cancelStreaming(); tts.stop(); messages.clear(); syncCurrent(); prompt = ""; attachments.clear(); return }
+                "/clear" -> { cancelStreaming(); clearRemoteSession(currentId); tts.stop(); messages.clear(); syncCurrent(); prompt = ""; attachments.clear(); return }
                 "/new" -> { tts.stop(); createNewSession(); prompt = ""; attachments.clear(); return }
                 "/help" -> {
                     tts.stop()
@@ -816,7 +820,7 @@ fun ChatScreen() {
                     }
                     if (messages.isNotEmpty()) {
                         FilledIconButton(onClick = {
-                            tts.stop(); messages.clear(); syncCurrent()
+                            cancelStreaming(); clearRemoteSession(currentId); tts.stop(); messages.clear(); syncCurrent()
                         }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Очистить историю")
                         }
@@ -1334,6 +1338,24 @@ suspend fun cancelAgentStream(host: String, accessToken: String, sessionId: Stri
             if (accessToken.isNotBlank()) conn.setRequestProperty("X-Ideal-Agent-Token", accessToken)
             conn.outputStream.use { }
             conn.inputStream.close()
+        } finally {
+            conn.disconnect()
+        }
+    } catch (_: Exception) { }
+}
+
+/** Clear the server history paired with a local chat. */
+suspend fun clearAgentSession(host: String, accessToken: String, sessionId: String) = withContext(Dispatchers.IO) {
+    try {
+        val url = URL("${agentBaseUrl(host)}/sessions/${java.net.URLEncoder.encode(sessionId, "UTF-8")}")
+        val conn = url.openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "DELETE"
+            conn.connectTimeout = 5_000
+            conn.readTimeout = 5_000
+            if (accessToken.isNotBlank()) conn.setRequestProperty("X-Ideal-Agent-Token", accessToken)
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            stream?.close()
         } finally {
             conn.disconnect()
         }

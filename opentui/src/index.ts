@@ -168,6 +168,20 @@ async function cancelActiveStream() {
   }
 }
 
+async function clearConversation() {
+  try {
+    const response = await request(`/sessions/${encodeURIComponent(config.sessionId)}`, { method: "DELETE" })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const result = await response.json() as { cleared?: boolean }
+    lines = []
+    redraw()
+    add("system", result.cleared ? "История очищена на клиенте и агенте" : "Локальная история очищена; контекста на агенте не было")
+    setStatus("online", "#86efac")
+  } catch (error) {
+    setStatus(`не удалось очистить контекст: ${error instanceof Error ? error.message : String(error)}`, "#fca5a5")
+  }
+}
+
 async function send(text: string) {
   if ((!text.trim() && !attachments.length) || busy) return
   busy = true
@@ -220,10 +234,6 @@ renderer.keyInput.on("keypress", (key) => {
   if (busy) return
   if (key.name === "f2") void showServerInfo()
   if (key.name === "f3") void send("/skills")
-  if (key.ctrl && key.name === "l") {
-    lines = []
-    redraw()
-    add("system", "История OpenTUI очищена")
-  }
+  if (key.ctrl && key.name === "l") void clearConversation()
 })
 await showServerInfo()

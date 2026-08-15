@@ -161,6 +161,16 @@ class TestHTTPChannel(unittest.TestCase):
             base + "/status", headers={"X-Ideal-Agent-Token": "test-token"}
         ), timeout=5).read())
         self.assertEqual(status["sessions"], 1)
+        clear = urllib.request.Request(
+            base + "/sessions/default",
+            headers={"X-Ideal-Agent-Token": "test-token"}, method="DELETE",
+        )
+        result = json.loads(urllib.request.urlopen(clear, timeout=5).read())
+        self.assertTrue(result["cleared"])
+        status = json.loads(urllib.request.urlopen(urllib.request.Request(
+            base + "/status", headers={"X-Ideal-Agent-Token": "test-token"}
+        ), timeout=5).read())
+        self.assertEqual(status["sessions"], 0)
 
 
 class TestStream(unittest.TestCase):
@@ -191,6 +201,16 @@ class TestStream(unittest.TestCase):
         self.assertEqual(len(agent._sessions), 32)
         self.assertNotIn("session-0", agent._sessions)
         self.assertIn("session-39", agent._sessions)
+        agent.close()
+
+    def test_clear_session_forgets_history(self):
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), use_context=False)
+        agent = Agent(cfg)
+        agent.provider = FakeProvider()
+        self.assertEqual(agent.run_in_session("to-clear", "привет"), "ok")
+        self.assertTrue(agent.clear_session("to-clear"))
+        self.assertNotIn("to-clear", agent._sessions)
+        self.assertFalse(agent.clear_session("to-clear"))
         agent.close()
 
     def test_fallback_stream(self):

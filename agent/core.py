@@ -148,6 +148,21 @@ class Agent:
         event.set()
         return True
 
+    def clear_session(self, session_id):
+        """Cancel and forget one conversation without revealing its history.
+
+        The run lock means a concurrent stream finishes its cleanup before the
+        cached history is removed.  This keeps the next message in the same
+        session from inheriting stale context.
+        """
+        session_id = session_id or "default"
+        self.cancel_session(session_id)
+        with self._run_lock:
+            existed = self._sessions.pop(session_id, None) is not None
+            if self._session_id == session_id:
+                self._session_id = "default"
+            return existed
+
     def active_streams(self):
         with self._cancellation_lock:
             return len(self._stream_cancellations)

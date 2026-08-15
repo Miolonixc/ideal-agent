@@ -713,6 +713,7 @@ class HTTPChannel(Channel):
     Эндпоинты:
       GET  /            -> статус агента
       POST /message     -> {"text": "..."}  => {"reply": "...", "chat_id": "http"}
+      DELETE /sessions/<id> -> удалить серверный контекст чата
       POST /webhook/github -> GitHub-событие (push/issue) проксируется агенту
     """
 
@@ -882,6 +883,25 @@ class HTTPChannel(Channel):
                     })
                 else:
                     self._send(404, {"ok": False, "error": "not found"})
+
+            def do_DELETE(self):
+                if not self._authorized():
+                    self._forbidden()
+                    return
+                if not bot._allow_request(self._rate_key()):
+                    self._rate_limited()
+                    return
+                match = re.fullmatch(
+                    r"/sessions/([A-Za-z0-9_.:-]{1,128})",
+                    urllib.parse.urlparse(self.path).path,
+                )
+                if not match:
+                    self._send(404, {"ok": False, "error": "not found"})
+                    return
+                self._send(200, {
+                    "ok": True,
+                    "cleared": bot._agent.clear_session(match.group(1)),
+                })
 
             def do_POST(self):
                 try:

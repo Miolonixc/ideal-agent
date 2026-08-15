@@ -117,6 +117,7 @@ python3 main.py "твоя задача"
 - **HTTP** — `python3 main.py http --port 8080` (для Android-компаньона и вебхуков):
   `GET /` статус, `POST /message` `{"text":...}`→`{"reply":...}`,
   `POST /sessions/<session_id>/cancel` отменяет активный streaming-запрос;
+  `DELETE /sessions/<session_id>` удаляет серверный контекст чата;
   `POST /webhook/github` принимает события GitHub (push/issues/PR).
 
 ## Слэш-команды (Telegram / TUI / HTTP)
