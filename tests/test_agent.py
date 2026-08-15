@@ -197,6 +197,17 @@ class TestCore(unittest.TestCase):
         self.assertIn("используй", agent.command("/audit many"))
         agent.close()
 
+    def test_clear_keeps_shared_context_resources_open(self):
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp(), use_context=True))
+        agent._ensure_context()
+        repo_index = agent.repo_index
+        memory = agent.memory
+        agent.command("/clear")
+        agent._ensure_context()
+        self.assertIs(agent.repo_index, repo_index)
+        self.assertIs(agent.memory, memory)
+        agent.close()
+
 
 class TestMemory(unittest.TestCase):
     def test_workspace_namespace_is_canonical_and_distinct(self):

@@ -384,7 +384,6 @@ class Agent:
             return "используй: /mode auto | suggest | full-auto"
         if cmd == "clear":
             self.history.messages = []
-            self._context_ready = False
             return "контекст диалога очищен"
         if cmd == "status":
             return (f"провайдер={self.provider.__class__.__name__} модель={self.provider.model} "
