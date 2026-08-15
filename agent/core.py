@@ -21,6 +21,7 @@ MAX_ITER = 12
 MAX_INLINE_ATTACHMENT_BYTES = 512 * 1024
 MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024
 MAX_SESSIONS = 32
+SESSION_IDLE_TTL_SECONDS = 12 * 60 * 60
 
 
 def _safe_tool_part(value: str) -> str:
@@ -55,9 +56,14 @@ class HistoryManager:
         self.provider = provider
         self.budget = budget
         self.messages: List[Dict[str, Any]] = []
+        self.last_used = time.monotonic()
 
     def add(self, msg):
         self.messages.append(msg)
+        self.last_used = time.monotonic()
+
+    def touch(self):
+        self.last_used = time.monotonic()
 
     def tokens(self):
         total = 0
@@ -129,6 +135,7 @@ class Agent:
 
     @property
     def history(self):
+        self._prune_idle_sessions()
         h = self._sessions.get(self._session_id)
         if h is None:
             if len(self._sessions) >= MAX_SESSIONS:
@@ -137,7 +144,17 @@ class Agent:
             self._sessions[self._session_id] = h
         else:
             self._sessions.move_to_end(self._session_id)
+        h.touch()
         return h
+
+    def _prune_idle_sessions(self):
+        """Forget inactive conversations while preserving active streams."""
+        cutoff = time.monotonic() - SESSION_IDLE_TTL_SECONDS
+        with self._cancellation_lock:
+            active = set(self._stream_cancellations)
+        for session_id, history in list(self._sessions.items()):
+            if session_id not in active and history.last_used < cutoff:
+                self._sessions.pop(session_id, None)
 
     def cancel_session(self, session_id):
         """Request cooperative cancellation of an active streaming session."""
@@ -175,6 +192,10 @@ class Agent:
     @staticmethod
     def session_limit():
         return MAX_SESSIONS
+
+    @staticmethod
+    def session_idle_ttl_seconds():
+        return SESSION_IDLE_TTL_SECONDS
 
     def load_skills_dir(self, skills_dir):
         from .skills import load_skills
@@ -431,7 +452,7 @@ class Agent:
             f"workspace: {'ok' if os.path.isdir(workspace) else 'не найдена'} ({workspace})",
             f"tools: {len(self.registry._tools)}; skills: {len(self._loaded_skills)}",
             f"mcp: {alive}/{len(clients)} запущено",
-            f"sessions: {self.session_count()}/{MAX_SESSIONS}; streams: {self.active_streams()}",
+            f"sessions: {self.session_count()}/{MAX_SESSIONS}; streams: {self.active_streams()}; idle TTL: 12h",
             f"mode: {self.gate.mode}; sandbox: {self.cfg.sandbox_mode}",
         ))
 

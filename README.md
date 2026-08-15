@@ -118,6 +118,8 @@ python3 main.py "твоя задача"
   `GET /` статус, `POST /message` `{"text":...}`→`{"reply":...}`,
   `POST /sessions/<session_id>/cancel` отменяет активный streaming-запрос;
   `DELETE /sessions/<session_id>` удаляет серверный контекст чата;
+  контекст также удаляется после 12 часов бездействия (и всегда ограничен 32
+  сессиями);
   `POST /webhook/github` принимает события GitHub (push/issues/PR).
 
 ## Слэш-команды (Telegram / TUI / HTTP)

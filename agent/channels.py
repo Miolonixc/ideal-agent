@@ -879,6 +879,7 @@ class HTTPChannel(Channel):
                         "tools": len(bot._agent.registry._tools),
                         "sessions": bot._agent.session_count(),
                         "session_limit": bot._agent.session_limit(),
+                        "session_idle_ttl_seconds": bot._agent.session_idle_ttl_seconds(),
                         "active_streams": bot._agent.active_streams(),
                     })
                 else:

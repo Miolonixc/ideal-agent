@@ -149,6 +149,7 @@ class TestHTTPChannel(unittest.TestCase):
         self.assertTrue(status["ok"])
         self.assertEqual(status["sessions"], 0)
         self.assertEqual(status["session_limit"], 32)
+        self.assertEqual(status["session_idle_ttl_seconds"], 12 * 60 * 60)
         self.assertEqual(status["active_streams"], 0)
         req = urllib.request.Request(
             base + "/message",
@@ -201,6 +202,18 @@ class TestStream(unittest.TestCase):
         self.assertEqual(len(agent._sessions), 32)
         self.assertNotIn("session-0", agent._sessions)
         self.assertIn("session-39", agent._sessions)
+        agent.close()
+
+    def test_idle_session_history_is_expired(self):
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), use_context=False)
+        agent = Agent(cfg)
+        agent._session_id = "stale"
+        agent.history.add({"role": "user", "content": "старый контекст"})
+        agent._sessions["stale"].last_used -= 12 * 60 * 60 + 1
+        agent._session_id = "fresh"
+        agent.history.add({"role": "user", "content": "новый контекст"})
+        self.assertNotIn("stale", agent._sessions)
+        self.assertIn("fresh", agent._sessions)
         agent.close()
 
     def test_clear_session_forgets_history(self):
