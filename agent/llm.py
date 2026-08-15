@@ -169,6 +169,8 @@ class OpenAICompatible:
         if tools:
             body["tools"] = tools
         tool_acc = {}
+        payloads = malformed = 0
+        saw_done = False
         with _open_request(
             f"{self.base_url}/chat/completions", body, self._headers(), self.timeout,
             self.__class__.__name__, self.retries,
@@ -179,10 +181,13 @@ class OpenAICompatible:
                     continue
                 payload = line[len("data:"):].strip()
                 if payload == "[DONE]":
+                    saw_done = True
                     break
+                payloads += 1
                 try:
                     obj = _json.loads(payload)
                 except _json.JSONDecodeError:
+                    malformed += 1
                     continue
                 choices = obj.get("choices")
                 if not choices:
@@ -201,6 +206,10 @@ class OpenAICompatible:
                         acc["function"]["name"] += fn["name"]
                     if fn.get("arguments"):
                         acc["function"]["arguments"] += fn["arguments"]
+        if payloads and malformed == payloads:
+            raise ProviderError(self.__class__.__name__, "некорректный SSE-ответ")
+        if payloads and not saw_done:
+            raise ProviderError(self.__class__.__name__, "оборванный SSE-ответ")
         tcs = [v for v in tool_acc.values()]
         if tcs:
             yield ("tool", tcs)

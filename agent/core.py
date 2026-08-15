@@ -1,6 +1,7 @@
 from __future__ import annotations
 import base64
 from collections import OrderedDict
+import hashlib
 import json
 import os
 import re
@@ -417,6 +418,8 @@ class Agent:
                 "/status — модель/режим/число тулов\n"
                 "/skills — список доступных навыков и тулов\n"
                 "/provider — текущий провайдер/модель\n"
+                "/remember ТЕКСТ — сохранить локальный факт\n"
+                "/memories [ЗАПРОС] — показать/найти сохранённые факты\n"
                 "/health — локальная диагностика без сетевого запроса\n"
                 "/metrics — локальные агрегатные метрики (если включены)\n"
                 "/audit [N] — последние N записей выполнения tools"
@@ -434,6 +437,29 @@ class Agent:
                     f"режим={self.gate.mode} тулов={len(self.registry._tools)}")
         if cmd == "provider":
             return f"{self.provider.__class__.__name__} / {self.provider.model}"
+        if cmd == "remember":
+            if not arg.strip():
+                return "используй: /remember ТЕКСТ"
+            if not self.cfg.use_context:
+                return "локальная память выключена (use_context: true в config.json)"
+            self._ensure_context()
+            if not self.memory:
+                return "локальная память недоступна"
+            fact = arg.strip()[:2000]
+            key = hashlib.sha256(fact.encode()).hexdigest()[:16]
+            self.memory.add("manual", key, fact)
+            return "сохранено в локальную память"
+        if cmd == "memories":
+            if not self.cfg.use_context:
+                return "локальная память выключена (use_context: true в config.json)"
+            self._ensure_context()
+            if not self.memory:
+                return "локальная память недоступна"
+            rows = (self.memory.recall(arg, scope="manual", top_k=5) if arg.strip()
+                    else self.memory.recent(scope="manual", limit=5))
+            if not rows:
+                return "вручную сохранённых фактов пока нет"
+            return "сохранённые факты:\n" + "\n".join(f"- {row['text']}" for row in rows)
         if cmd == "skills":
             names = sorted(self.registry._tools.keys())
             return "навыки и тулы: " + ", ".join(names)

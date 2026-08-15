@@ -124,7 +124,12 @@ python3 main.py "твоя задача"
 
 ## Слэш-команды (Telegram / TUI / HTTP)
 `/help`, `/mode [auto|suggest|full-auto]`, `/clear`, `/status`, `/provider`, `/skills`,
-`/health`, `/metrics`, `/audit [N]`.
+`/remember ТЕКСТ`, `/memories [ЗАПРОС]`, `/health`, `/metrics`, `/audit [N]`.
+
+`/remember` сохраняет короткий факт только в локальной SQLite-памяти рабочего
+пространства. `/memories` показывает до пяти последних вручную сохранённых
+фактов, а с запросом — ищет по ним. Для этих команд нужен `use_context: true`;
+они не выполняют дополнительный запрос к провайдеру.
 
 ## Локальные метрики (необязательно)
 

@@ -224,6 +224,23 @@ class MemoryStore:
                 break
         return out
 
+    def recent(self, scope: Optional[str] = None, limit: int = 5) -> List[Dict[str, Any]]:
+        """Return recent local memories without sending them to a provider."""
+        limit = max(1, min(int(limit), 20))
+        if scope:
+            rows = self.conn.execute(
+                "SELECT scope, key, value FROM memory WHERE scope=? ORDER BY used DESC LIMIT ?",
+                (scope, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT scope, key, value FROM memory ORDER BY used DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [
+            {"text": value, "meta": {"scope": item_scope, "key": key}}
+            for item_scope, key, value in rows
+        ]
+
     def extract_facts(self, text: str, provider) -> List[str]:
         prompt = (
             "Извлеки факты, решения и предпочтения из текста. "

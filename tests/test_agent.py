@@ -138,6 +138,16 @@ class TestLLM(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, "оборванный SSE"):
             p._parse_sse('data: {"choices":[{"delta":{"content":"hi"}}]}\n')
 
+    def test_stream_completion_rejects_incomplete_sse(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.__iter__.return_value = [
+            b'data: {"choices":[{"delta":{"content":"hi"}}]}\n',
+        ]
+        p = OpenAICompatible("https://x/v1", "key", "model")
+        with mock.patch("urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(ProviderError, "оборванный SSE"):
+                list(p.stream_completion([{"role": "user", "content": "hi"}]))
+
 
 class TestCore(unittest.TestCase):
     def test_opt_in_metrics_are_aggregate_only(self):
@@ -225,6 +235,18 @@ class TestCore(unittest.TestCase):
         self.assertEqual(agent.run("one"), "ok")
         self.assertEqual(agent.run("two"), "ok")
         self.assertIn("two", str(agent.history.messages))
+        agent.close()
+
+    def test_manual_memory_commands_are_local_and_searchable(self):
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp(), use_context=True))
+        self.assertIn("сохранено", agent.command("/remember Предпочитаю краткие ответы"))
+        self.assertIn("краткие ответы", agent.command("/memories краткие"))
+        self.assertIn("краткие ответы", agent.command("/memories"))
+        agent.close()
+
+    def test_manual_memory_explains_when_context_is_disabled(self):
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp(), use_context=False))
+        self.assertIn("выключена", agent.command("/remember тест"))
         agent.close()
 
     def test_concurrent_sessions_keep_their_own_history(self):
