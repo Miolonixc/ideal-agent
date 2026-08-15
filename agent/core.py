@@ -187,6 +187,7 @@ class Agent:
     def session_count(self):
         """Return the number of cached conversations without exposing their data."""
         with self._run_lock:
+            self._prune_idle_sessions()
             return len(self._sessions)
 
     @staticmethod

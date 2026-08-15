@@ -210,6 +210,7 @@ class TestStream(unittest.TestCase):
         agent._session_id = "stale"
         agent.history.add({"role": "user", "content": "старый контекст"})
         agent._sessions["stale"].last_used -= 12 * 60 * 60 + 1
+        self.assertEqual(agent.session_count(), 0)
         agent._session_id = "fresh"
         agent.history.add({"role": "user", "content": "новый контекст"})
         self.assertNotIn("stale", agent._sessions)
