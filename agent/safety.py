@@ -5,6 +5,7 @@ import re
 import shlex
 import sqlite3
 import subprocess
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -14,33 +15,37 @@ from .memory import state_dir
 class AuditLog:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or os.path.join(state_dir(), "audit.db")
-        # Audit writes may come from the HTTP handler thread, not the thread
-        # that constructed Agent. Agent's run lock serializes these calls.
+        # Audit writes may come from HTTP handler threads, not the thread that
+        # constructed Agent.
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._lock = threading.RLock()
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS audit("
             "ts REAL, decision TEXT, tool TEXT, args TEXT, result TEXT)"
         )
 
     def record(self, decision: str, tool: str, args: Any, result: str):
-        self.conn.execute(
-            "INSERT INTO audit VALUES(?,?,?,?,?)",
-            (time.time(), decision, tool, json.dumps(args)[:2000], str(result)[:4000]),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO audit VALUES(?,?,?,?,?)",
+                (time.time(), decision, tool, json.dumps(args)[:2000], str(result)[:4000]),
+            )
+            self.conn.commit()
 
     def recent(self, limit: int = 10):
         limit = max(1, min(int(limit), 50))
-        rows = self.conn.execute(
-            "SELECT ts, decision, tool, result FROM audit ORDER BY ts DESC LIMIT ?", (limit,)
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT ts, decision, tool, result FROM audit ORDER BY ts DESC LIMIT ?", (limit,)
+            ).fetchall()
         return [
             {"ts": ts, "decision": decision, "tool": tool, "result": result}
             for ts, decision, tool, result in rows
         ]
 
     def close(self):
-        self.conn.close()
+        with self._lock:
+            self.conn.close()
 
 
 class ApprovalGate:

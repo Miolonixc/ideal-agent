@@ -208,6 +208,49 @@ class TestCore(unittest.TestCase):
         self.assertIs(agent.memory, memory)
         agent.close()
 
+    def test_failed_history_compaction_does_not_discard_reply(self):
+        class Provider:
+            model = "fake"
+            def __init__(self): self.calls = 0
+            def count_tokens(self, text): return 10
+            def complete(self, messages, tools=None, stream=False):
+                self.calls += 1
+                if self.calls <= 2:
+                    return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+                raise RuntimeError("summary unavailable")
+
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), context_budget=1, use_context=False)
+        agent = Agent(cfg)
+        agent.provider = Provider()
+        self.assertEqual(agent.run("one"), "ok")
+        self.assertEqual(agent.run("two"), "ok")
+        self.assertIn("two", str(agent.history.messages))
+        agent.close()
+
+    def test_concurrent_sessions_keep_their_own_history(self):
+        class EchoProvider:
+            model = "fake"
+            def count_tokens(self, text): return len(text)
+            def complete(self, messages, tools=None, stream=False):
+                latest = next(message for message in reversed(messages) if message["role"] == "user")
+                return {"choices": [{"message": {"role": "assistant", "content": latest["content"]}}]}
+
+        agent = Agent(AgentConfig(workspace=tempfile.mkdtemp(), use_context=False))
+        agent.provider = EchoProvider()
+        start = threading.Barrier(3)
+        results = {}
+        def run(session_id, text):
+            start.wait()
+            results[session_id] = agent.run_in_session(session_id, text)
+        first = threading.Thread(target=run, args=("first", "alpha"))
+        second = threading.Thread(target=run, args=("second", "beta"))
+        first.start(); second.start(); start.wait()
+        first.join(timeout=5); second.join(timeout=5)
+        self.assertEqual(results, {"first": "alpha", "second": "beta"})
+        self.assertIn("alpha", str(agent._sessions["first"].messages))
+        self.assertNotIn("beta", str(agent._sessions["first"].messages))
+        agent.close()
+
 
 class TestMemory(unittest.TestCase):
     def test_workspace_namespace_is_canonical_and_distinct(self):
@@ -280,6 +323,17 @@ class TestSafety(unittest.TestCase):
         self.assertEqual(g.decide("read_file", '{"path":"x"}')[0], "allow")
         AuditLog(":memory:").record("allow", "read_file", {}, "ok")
         self.assertTrue(make_diff("a=1", "a=2", "f.py"))
+
+    def test_audit_log_accepts_parallel_writes(self):
+        with tempfile.TemporaryDirectory() as d:
+            audit = AuditLog(os.path.join(d, "audit.db"))
+            threads = [threading.Thread(
+                target=lambda index=index: audit.record("allow", "echo", {"i": index}, "ok")
+            ) for index in range(20)]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join(timeout=5)
+            self.assertEqual(len(audit.recent(50)), 20)
+            audit.close()
 
 
 class TestSkills(unittest.TestCase):

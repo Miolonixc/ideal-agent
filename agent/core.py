@@ -75,27 +75,39 @@ class HistoryManager:
 
     def compact(self):
         if self.tokens() <= self.budget or len(self.messages) < 4:
-            return
+            return False
         keep = self.messages[-3:]
         to_sum = self.messages[:-3]
         text = "\n".join(
             f"{m.get('role')}: {_content_to_text(m.get('content'))}" for m in to_sum
         )
-        summary = self.provider.complete(
-            [
-                {"role": "system", "content": "Сожми ниже в краткое резюме контекста для агента."},
-                {"role": "user", "content": text},
-            ],
-            stream=False,
-        )
+        try:
+            summary = self.provider.complete(
+                [
+                    {"role": "system", "content": "Сожми ниже в краткое резюме контекста для агента."},
+                    {"role": "user", "content": text},
+                ],
+                stream=False,
+            )
+        except Exception:
+            # Summarization is a best-effort maintenance request.  The
+            # completed user request and its history must remain valid even
+            # when the provider is temporarily unavailable.
+            return False
         if isinstance(summary, str):
             summ = summary
         else:
             choices = summary.get("choices") if isinstance(summary, dict) else None
-            summ = choices[0]["message"]["content"] if choices else ""
+            first = choices[0] if isinstance(choices, list) and choices else {}
+            message = first.get("message") if isinstance(first, dict) else {}
+            summ = message.get("content", "") if isinstance(message, dict) else ""
+        if not summ:
+            return False
         self.messages = [
             {"role": "system", "content": f"[summary of earlier context]\n{summ}"}
         ] + keep
+        self.touch()
+        return True
 
 
 class Agent:
@@ -105,6 +117,7 @@ class Agent:
         self._sessions: OrderedDict[str, HistoryManager] = OrderedDict()
         self._session_id = "default"
         self._run_lock = threading.RLock()
+        self._close_lock = threading.Lock()
         self._cancellation_lock = threading.Lock()
         self._stream_cancellations: Dict[str, threading.Event] = {}
         self.registry = registry or ToolRegistry()
@@ -313,23 +326,32 @@ class Agent:
                 for t in tools]
 
     def close(self):
-        if self._closed:
-            return
-        self._closed = True
-        with self._cancellation_lock:
-            for event in self._stream_cancellations.values():
-                event.set()
-        for client in self._mcp_clients:
-            try:
-                client.close()
-            except Exception:
-                pass
-        for resource in (self.repo_index, self.memory, self.audit, self.metrics):
-            if resource is not None:
+        """Stop new work, cancel active streams, then release shared resources."""
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            with self._cancellation_lock:
+                for event in self._stream_cancellations.values():
+                    event.set()
+        # A stream owns _run_lock for its whole generator lifetime.  Waiting
+        # here prevents SQLite/MCP resources from being closed underneath it.
+        with self._run_lock:
+            for client in self._mcp_clients:
                 try:
-                    resource.close()
+                    client.close()
                 except Exception:
                     pass
+            for resource in (self.repo_index, self.memory, self.audit, self.metrics):
+                if resource is not None:
+                    try:
+                        resource.close()
+                    except Exception:
+                        pass
+
+    def _require_open(self):
+        if self._closed:
+            raise RuntimeError("агент остановлен")
 
     def _extract_tool_calls(self, msg):
         tcs = msg.get("tool_calls")
@@ -472,6 +494,7 @@ class Agent:
 
     def command_in_session(self, session_id, text):
         with self._run_lock:
+            self._require_open()
             self._session_id = session_id or "default"
             return self.command(text)
 
@@ -528,6 +551,7 @@ class Agent:
         return {"role": "user", "content": parts}
 
     def run(self, text, attachments=None):
+        self._require_open()
         self._record_metric("requests")
         try:
             self.history.add(self._build_user_message(text, attachments))
@@ -556,11 +580,13 @@ class Agent:
     def run_in_session(self, session_id, text, attachments=None):
         """Keep mutable history and provider state isolated between HTTP requests."""
         with self._run_lock:
+            self._require_open()
             self._session_id = session_id or "default"
             return self.run(text, attachments)
 
     def stream(self, text, attachments=None, cancel_event=None):
         """Генератор: yield куски ответа по мере генерации (streaming)."""
+        self._require_open()
         self._record_metric("requests")
         try:
             yield from self._stream_impl(text, attachments, cancel_event)
@@ -638,6 +664,7 @@ class Agent:
     def stream_in_session(self, session_id, text, attachments=None):
         session_id = session_id or "default"
         with self._run_lock:
+            self._require_open()
             cancellation = threading.Event()
             with self._cancellation_lock:
                 self._stream_cancellations[session_id] = cancellation

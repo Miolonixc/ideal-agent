@@ -193,6 +193,38 @@ class TestStream(unittest.TestCase):
         self.assertIn("отменена", agent._sessions["cancel-test"].messages[-1]["content"])
         agent.close()
 
+    def test_close_waits_for_active_stream_and_rejects_new_work(self):
+        class BlockingProvider:
+            model = "fake"
+            def __init__(self):
+                self.started = threading.Event()
+                self.release = threading.Event()
+            def count_tokens(self, text): return len(text)
+            def stream_completion(self, messages, tools=None):
+                self.started.set()
+                yield ("content", "первая часть")
+                self.release.wait(5)
+                yield ("content", "вторая часть")
+
+        cfg = AgentConfig(workspace=tempfile.mkdtemp(), mode="full-auto", use_context=False)
+        agent = Agent(cfg)
+        provider = BlockingProvider()
+        agent.provider = provider
+        received, errors = [], []
+        worker = threading.Thread(target=lambda: received.extend(agent.stream_in_session("closing", "привет")))
+        worker.start()
+        self.assertTrue(provider.started.wait(2))
+        closer = threading.Thread(target=agent.close)
+        closer.start()
+        self.assertTrue(closer.is_alive())
+        provider.release.set()
+        worker.join(timeout=5); closer.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(closer.is_alive())
+        self.assertEqual(received, ["первая часть"])
+        with self.assertRaisesRegex(RuntimeError, "остановлен"):
+            agent.run("после close")
+
     def test_session_history_has_a_bounded_lru_cache(self):
         cfg = AgentConfig(workspace=tempfile.mkdtemp(), use_context=False)
         agent = Agent(cfg)
