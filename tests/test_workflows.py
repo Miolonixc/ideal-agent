@@ -12,6 +12,8 @@ class TestWorkflows(unittest.TestCase):
         self.assertIn("Create APK checksum", workflow)
         self.assertIn("sha256sum *.apk", workflow)
         self.assertIn("*.sha256", workflow)
+        self.assertIn("actions/cache@v4", workflow)
+        self.assertIn("for attempt in 1 2 3", workflow)
 
     def test_android_release_requires_signing_secrets(self):
         path = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", "android-release.yml")
@@ -22,3 +24,5 @@ class TestWorkflows(unittest.TestCase):
         self.assertIn("action-gh-release", workflow)
         self.assertIn("GITHUB_REF_NAME", workflow)
         self.assertIn("IDEAL_APP_VERSION_NAME", workflow)
+        self.assertIn("actions/cache@v4", workflow)
+        self.assertIn("for attempt in 1 2 3", workflow)

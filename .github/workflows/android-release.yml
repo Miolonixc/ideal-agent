@@ -18,6 +18,15 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/idealagent/**/*.gradle*', 'android/idealagent/gradle.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
       - name: Verify signing secrets
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -51,8 +60,16 @@ jobs:
             "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
             --output /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp
-          IDEAL_APP_VERSION_NAME="$VERSION_NAME" IDEAL_APP_VERSION_CODE="$VERSION_CODE" /tmp/gradle-${GRADLE_VERSION}/bin/gradle \
-            --project-dir android/idealagent --no-daemon assembleRelease
+          for attempt in 1 2 3; do
+            if IDEAL_APP_VERSION_NAME="$VERSION_NAME" IDEAL_APP_VERSION_CODE="$VERSION_CODE" /tmp/gradle-${GRADLE_VERSION}/bin/gradle \
+              --project-dir android/idealagent --no-daemon assembleRelease; then
+              exit 0
+            fi
+            if [ "$attempt" = 3 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
       - name: Create checksum and SBOM
         run: |
           cd android/idealagent/app/build/outputs/apk/release

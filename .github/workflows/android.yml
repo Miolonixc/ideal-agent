@@ -21,6 +21,16 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/idealagent/**/*.gradle*', 'android/idealagent/gradle.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
       - name: Install SDK packages
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
@@ -32,8 +42,16 @@ jobs:
             "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
             --output /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp
-          /tmp/gradle-${GRADLE_VERSION}/bin/gradle \
-            --project-dir android/idealagent --no-daemon assembleDebug
+          for attempt in 1 2 3; do
+            if /tmp/gradle-${GRADLE_VERSION}/bin/gradle \
+              --project-dir android/idealagent --no-daemon assembleDebug; then
+              exit 0
+            fi
+            if [ "$attempt" = 3 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
 
       - name: Create APK checksum
         run: |
